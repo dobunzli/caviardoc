@@ -1,0 +1,278 @@
+{
+  "avertissement": "Corpus entierement fabrique. Aucune de ces personnes n'existe ; les numeros AVS et IBAN portent des sommes de controle valides mais ne correspondent a aucun assure. Les formes reproduites — couche texte degradee, pied de page en lettres espacees, tableau a colonne Prescripteur, destinataire medecin — sont celles relevees sur un corpus medical reel, dont aucune donnee ne subsiste ici.",
+  "documents": [
+    {
+      "id": "consultation_ophtalmo",
+      "forme": "en-tete propre, patronyme en capitales, date de naissance introduite par « Né(e) le »",
+      "texte": "CENTRE OPHTALMOLOGIQUE DU RIVAGE\n\nDr Philippe MERCIER\nSpécialiste en ophtalmologie FMH\nRue des Noisetiers 42\n1510 Moudon\ntel 032 555 88 66\nfax 032 555 88 67\n\nMoudon, lundi 24 août 2020\n\nCher confrère\n\nJe vous adresse le compte-rendu de la consultation concernant :\n\nMonsieur FONTANNAZ Yannick Né(e) le 23.04.1931\nChemin des Ifs 17  1091 Grandvaux VD\nTéléphone : 032 555 94 94\nN° AVS : 756.1234.5678.97\n\nAcuité visuelle corrigée de 0.8 à droite et 0.6 à gauche. Cataracte\nnucléaire bilatérale, plus marquée à gauche. Pression intra-oculaire\ndans les normes. Macula sans particularité aux deux yeux.\n\nUne intervention est indiquée à gauche dans les mois qui viennent.\n\nSalutations confraternelles.",
+      "entites": [
+        {
+          "texte": "FONTANNAZ Yannick",
+          "role": "patient",
+          "type": "personne"
+        },
+        {
+          "texte": "23.04.1931",
+          "role": "patient",
+          "type": "date de naissance"
+        },
+        {
+          "texte": "Chemin des Ifs 17",
+          "role": "patient",
+          "type": "rue"
+        },
+        {
+          "texte": "032 555 94 94",
+          "role": "patient",
+          "type": "numero de telephone"
+        },
+        {
+          "texte": "756.1234.5678.97",
+          "role": "patient",
+          "type": "numero AVS"
+        },
+        {
+          "texte": "Dr Philippe MERCIER",
+          "role": "soignant",
+          "type": "personne"
+        },
+        {
+          "texte": "Rue des Noisetiers 42",
+          "role": "soignant",
+          "type": "rue"
+        },
+        {
+          "texte": "032 555 88 66",
+          "role": "soignant",
+          "type": "numero de telephone"
+        }
+      ],
+      "preserver": [
+        "Cataracte",
+        "Macula",
+        "Pression intra-oculaire",
+        "Acuité visuelle",
+        "Cher confrère",
+        "intervention"
+      ]
+    },
+    {
+      "id": "rapport_imagerie_pied_espace",
+      "forme": "pied de page compose en lettres espacees, repetant le nom de l'etablissement",
+      "texte": "CABINET D'IMAGERIE DU BELVEDERE\n\nMonsieur Yannick FONTANNAZ né le 23.04.1931\nExamen du 2 avril 2021\n\nECHO-DOPPLER VEINEUX DU MEMBRE INFERIEUR GAUCHE\n\nRenseignements cliniques\nŒdème du membre inférieur gauche depuis le week-end dernier.\n\nDescription\nToutes les veines du réseau profond sont souples et compressibles.\nPas de cordon induré des tissus sous-cutanés.\n\nConclusion\nPas d'argument en faveur d'une thrombose veineuse profonde.\n\nDr Paolo CAVALLINI\nRapport validé électroniquement\n\nC a b i n e t  d ' i m a g e r i e  d u  B e l v e d e r e   Rue des Vergers 14\n1091 Grandvaux   Tel 032 555 11 00   contact@imagerie-belvedere.ch",
+      "entites": [
+        {
+          "texte": "Yannick FONTANNAZ",
+          "role": "patient",
+          "type": "personne"
+        },
+        {
+          "texte": "23.04.1931",
+          "role": "patient",
+          "type": "date de naissance"
+        },
+        {
+          "texte": "Dr Paolo CAVALLINI",
+          "role": "soignant",
+          "type": "personne"
+        },
+        {
+          "texte": "CABINET D'IMAGERIE DU BELVEDERE",
+          "role": "etablissement",
+          "type": "employeur"
+        },
+        {
+          "texte": "C a b i n e t  d ' i m a g e r i e  d u  B e l v e d e r e",
+          "role": "etablissement",
+          "type": "employeur"
+        },
+        {
+          "texte": "contact@imagerie-belvedere.ch",
+          "role": "etablissement",
+          "type": "email"
+        }
+      ],
+      "preserver": [
+        "thrombose veineuse profonde",
+        "Œdème du membre inférieur",
+        "ECHO-DOPPLER VEINEUX DU MEMBRE INFERIEUR GAUCHE",
+        "compressibles"
+      ]
+    },
+    {
+      "id": "laboratoire_tableau",
+      "forme": "tableau a colonne « Prescripteur », soignant qualifie par un sigle entre parentheses",
+      "texte": "LABORATOIRE D'ANALYSES DU CANTON\n\nPatient\nFONTANNAZ Yannick, 23.04.1931\nChemin des Ifs 17, 1091 Grandvaux\n\nCode de dossier    Date/heure de prélèvement    Prescripteur              Etat\nAD22042893         26/01/2022 05:00             LAMY AMANDINE (PRT)       Final\nAD22041632         25/01/2022 06:00             LAMY AMANDINE (PRT)       Final\nAD22031733         18/01/2022 06:00             DUCOMMUN MARC (IDE)       Non validé\n\nCHIMIE CLINIQUE\nCréatinine        88 umol/l      normal\nHémoglobine       126 g/l        anormal\nIndice d'hémolyse                négatif\n\nValidé électroniquement par DRE Ana COSTA (Médecin hospitalier)",
+      "entites": [
+        {
+          "texte": "FONTANNAZ Yannick",
+          "role": "patient",
+          "type": "personne"
+        },
+        {
+          "texte": "23.04.1931",
+          "role": "patient",
+          "type": "date de naissance"
+        },
+        {
+          "texte": "Chemin des Ifs 17",
+          "role": "patient",
+          "type": "rue"
+        },
+        {
+          "texte": "LAMY AMANDINE",
+          "role": "soignant",
+          "type": "personne"
+        },
+        {
+          "texte": "DUCOMMUN MARC",
+          "role": "soignant",
+          "type": "personne"
+        },
+        {
+          "texte": "DRE Ana COSTA",
+          "role": "soignant",
+          "type": "personne"
+        }
+      ],
+      "preserver": [
+        "Créatinine",
+        "Hémoglobine",
+        "Indice d'hémolyse",
+        "Non validé",
+        "anormal",
+        "normal",
+        "négatif",
+        "Prescripteur",
+        "Patient"
+      ]
+    },
+    {
+      "id": "courrier_au_confrere",
+      "forme": "destinataire medecin nomme apres « Au medecin responsable du patient »",
+      "texte": "SERVICE DE NEUROLOGIE\n\nAu médecin responsable du patient\nDUCOMMUN Marc\nCabinet médical\nRue Arnold-Vautier 11\n1510 Moudon\n\nSaillon, le 08.03.2022\n\nMonsieur et cher Confrère,\n\nVous nous adressez Monsieur FONTANNAZ Yannick, né le 23.04.1931,\ndomicilié Chemin des Ifs 17 à 1091 Grandvaux, pour l'évaluation d'un\nsyndrome extrapyramidal.\n\nL'examen retrouve une bradykinésie modérée et un tremblement de repos\ndu membre supérieur droit. Le périmètre de marche est conservé.\n\nAvec mes messages confraternels.\n\nDRE Sylvie GIRARD",
+      "entites": [
+        {
+          "texte": "FONTANNAZ Yannick",
+          "role": "patient",
+          "type": "personne"
+        },
+        {
+          "texte": "23.04.1931",
+          "role": "patient",
+          "type": "date de naissance"
+        },
+        {
+          "texte": "Chemin des Ifs 17",
+          "role": "patient",
+          "type": "rue"
+        },
+        {
+          "texte": "DUCOMMUN Marc",
+          "role": "soignant",
+          "type": "personne"
+        },
+        {
+          "texte": "DRE Sylvie GIRARD",
+          "role": "soignant",
+          "type": "personne"
+        },
+        {
+          "texte": "Rue Arnold-Vautier 11",
+          "role": "soignant",
+          "type": "rue"
+        }
+      ],
+      "preserver": [
+        "syndrome extrapyramidal",
+        "bradykinésie",
+        "tremblement de repos",
+        "périmètre de marche",
+        "Monsieur et cher Confrère",
+        "médecin"
+      ]
+    },
+    {
+      "id": "ordonnance",
+      "forme": "nom du patient accole a sa date de naissance, liste de medicaments a preserver",
+      "texte": "Dr méd. Philippe MERCIER\nMédecine Interne Générale (CH), membre FMH\nRue des Noisetiers 42\nCase postale\n1510 Moudon\nTéléphone: 032 555 88 66  Fax: 032 555 88 67\n\nM. Yannick Fontannaz 23.04.1931\n\nRp.\nA renouveler un an\n\nATACAND cpr 16 mg 98 pce\n1-0-0-0\nDALMADORM MITE cpr 15 mg 100 pce\n0-0-0-1\nPRADIF T cpr ret 400 mcg 100 pce\n0-0-1-0\nVANNAIR 200/6 aéros doseur 120 dos\n3-4x/jour en réserve",
+      "entites": [
+        {
+          "texte": "Yannick Fontannaz",
+          "role": "patient",
+          "type": "personne"
+        },
+        {
+          "texte": "23.04.1931",
+          "role": "patient",
+          "type": "date de naissance"
+        },
+        {
+          "texte": "Dr méd. Philippe MERCIER",
+          "role": "soignant",
+          "type": "personne"
+        },
+        {
+          "texte": "Rue des Noisetiers 42",
+          "role": "soignant",
+          "type": "rue"
+        },
+        {
+          "texte": "032 555 88 66",
+          "role": "soignant",
+          "type": "numero de telephone"
+        }
+      ],
+      "preserver": [
+        "ATACAND",
+        "DALMADORM MITE",
+        "PRADIF T",
+        "VANNAIR",
+        "A renouveler un an",
+        "Médecine Interne Générale"
+      ]
+    },
+    {
+      "id": "fiche_ocr_degrade",
+      "forme": "couche texte issue d'un OCR rate de formulaire manuscrit",
+      "texte": "FICHE DE TRANSFERT DES RESIDANTS\nEtabli par Lr)L l l M\nHôpital de destination.\nUnité de soins SlVHMh /SàùemXÛ. du service.\nDonnées administratives du patient\nN o m F O N T A N N A Z\nPrénom .\"VRV Yannick Sexe M\nDate de naissance 23.04.1931\nLocalité : 1091 Grandvaux\nAdresse : Chemin des Ifs 17\nTéléphone : 032.555.94.94\nMédecin traitant DUCOMMUN Marc\nCaisse maladie SAUtTAZ\nMotif du transfert : tMVQ(ls^ŒJL(.Uu",
+      "entites": [
+        {
+          "texte": "F O N T A N N A Z",
+          "role": "patient",
+          "type": "personne"
+        },
+        {
+          "texte": "Yannick",
+          "role": "patient",
+          "type": "personne"
+        },
+        {
+          "texte": "23.04.1931",
+          "role": "patient",
+          "type": "date de naissance"
+        },
+        {
+          "texte": "Chemin des Ifs 17",
+          "role": "patient",
+          "type": "rue"
+        },
+        {
+          "texte": "032.555.94.94",
+          "role": "patient",
+          "type": "numero de telephone"
+        },
+        {
+          "texte": "DUCOMMUN Marc",
+          "role": "soignant",
+          "type": "personne"
+        }
+      ],
+      "preserver": [
+        "Motif du transfert",
+        "Caisse maladie",
+        "Unité de soins"
+      ]
+    }
+  ]
+}

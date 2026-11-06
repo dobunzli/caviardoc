@@ -1,0 +1,54 @@
+# --- Fichiers volumineux : jamais dans le depot -----------------------------
+# Le modele (350 Mo) vit dans le repertoire de donnees local, pas ici.
+# C'est exactement l'erreur qui a paralyse le projet dont celui-ci s'inspire.
+*.onnx
+models/
+*.safetensors
+
+# uv.lock est volontairement suivi : il garantit des versions
+# identiques sur toutes vos machines.
+
+# --- Environnements et caches ----------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# --- Documents de travail : peuvent contenir des donnees reelles ------------
+# Ancrees a la racine : `tests/corpus/` est un corpus fabrique, versionne
+# volontairement, et un motif non ancre l'excluait aussi — le depot partait
+# alors sans lui, ce que seule l'integration continue a revele.
+/corpus/
+/sorties/
+# Les memes a cote du code, depuis que celui-ci vit dans `programme/`.
+/programme/corpus/
+/programme/sorties/
+# Notes internes (campagnes de mesure, travail multi-machines) : sur disque seulement.
+/programme/docs/MACHINES.md
+*.local.*
+
+# --- Fichiers temporaires et sauvegardes locales ----------------------------
+# Revues de travail : elles peuvent contenir des donnees reelles.
+*.abime-*
+*.tmp
+revues/
+
+# --- Synology Drive et systemes de fichiers --------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+# Copies de conflit generees par Synology Drive lors d'une edition simultanee
+*conflit*
+*conflict*
+
+# --- Environnements de test jetables ---------------------------------------
+civenv*/
+
+# --- Reglages locaux de Claude Code -----------------------------------------
+.claude/

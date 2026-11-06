@@ -1,0 +1,82 @@
+name: tests
+
+# Pas sur chaque `push`. Le depot sert d'abord a travailler sur deux machines :
+# un commit y est un transport, pas une proposition de modification, et lancer
+# sept jobs — dont deux sur macOS, factures dix fois le tarif Linux — a chaque
+# aller-retour est du gaspillage.
+#
+# La boucle de retour rapide est locale : `pytest` rend son verdict en deux
+# minutes. L'integration continue sert a autre chose — verifier Windows et
+# Linux, que le poste de developpement n'a pas — et cela se demande quand on en
+# a besoin : avant une publication, apres un changement de dependance, ou au
+# moindre doute.
+on:
+  pull_request:
+  workflow_dispatch:
+
+# Le code vit dans `programme/` : la racine du depot ne montre que les
+# lanceurs, le README et la licence.
+defaults:
+  run:
+    working-directory: programme
+
+jobs:
+  # Les tests n'ont pas besoin du moteur de detection : ils passent `None`
+  # comme modele et exercent les regles deterministes, la mecanique .docx et
+  # toute la logique de spans. La CI n'installe donc ni onnxruntime, ni torch,
+  # ni le modele de 350 Mo — elle tourne en quelques secondes.
+  tests:
+    name: ${{ matrix.os }} · Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Installer les dependances
+        run: uv sync --locked --extra documents --extra dev --python ${{ matrix.python }}
+
+      - name: Tests
+        run: uv run --no-sync pytest -q
+
+  # Le diagnostic et l'installation doivent fonctionner sur un Python nu, avant
+  # toute dependance : c'est leur raison d'etre sur une machine neuve. Ce job
+  # verifie cette promesse plutot que de la supposer.
+  python-nu:
+    name: Python nu (sans dependances)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: doctor et info sans aucune dependance installee
+        run: |
+          python -c "import sys; assert 'onnxruntime' not in sys.modules"
+          PYTHONPATH=src python -m caviardoc info
+          PYTHONPATH=src python -m caviardoc doctor || true
+
+  # Audit des dependances : une seule fois, pas dans chaque cellule de la
+  # matrice. Il lit le verrou (`uv.lock`), donc ce qui est reellement installe.
+  audit:
+    name: Audit des dependances (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: pip-audit sur le verrou
+        run: |
+          uv export --locked --extra documents --no-hashes --no-emit-project > "$RUNNER_TEMP/exigences.txt"
+          uvx pip-audit --no-deps --disable-pip -r "$RUNNER_TEMP/exigences.txt"

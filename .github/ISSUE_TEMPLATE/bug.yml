@@ -1,0 +1,63 @@
+name: Signaler un problème
+description: Quelque chose ne fonctionne pas comme prévu dans Caviardoc.
+title: "[Problème] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ⚠️ Ne joignez AUCUN document réel ni donnée de patient
+        Cette page est **publique**. N'y déposez ni document, ni extrait, ni capture d'écran non caviardée contenant un nom, une date de naissance, un numéro de sécurité sociale ou toute autre donnée de patient. Décrivez le problème avec des mots, ou avec un document fictif.
+  - type: input
+    id: version
+    attributes:
+      label: Version de Caviardoc
+      description: Elle s'affiche en bas de la page de l'interface (« Caviardoc 0.x.y »).
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: systeme
+    attributes:
+      label: Système
+      description: macOS ou Windows, avec la version.
+      placeholder: "macOS 14.5 ou Windows 11 23H2"
+    validations:
+      required: true
+  - type: textarea
+    id: etapes
+    attributes:
+      label: Étapes pour reproduire
+      placeholder: |
+        1. J'ouvre Caviardoc
+        2. Je dépose un document
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: attendu
+    attributes:
+      label: Résultat attendu
+    validations:
+      required: true
+  - type: textarea
+    id: obtenu
+    attributes:
+      label: Résultat obtenu
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Sortie de « caviardoc doctor » (facultatif)
+      description: Collez ici le texte affiché par la commande. Il ne contient pas de donnée de patient.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: confidentialite
+    attributes:
+      label: Confidentialité
+      options:
+        - label: Je n'ai joint aucun document réel ni aucune donnée de patient (ni capture d'écran non caviardée)
+          required: true

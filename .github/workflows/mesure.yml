@@ -1,0 +1,119 @@
+name: mesure
+
+# Sur demande uniquement. Chaque job telecharge un modele de plusieurs
+# centaines de megaoctets et, pour deux d'entre eux, tourne sur un runner macOS
+# facture dix fois le tarif Linux. Le declencher a chaque commit revenait a
+# refaire, plusieurs fois par jour, une campagne dont la conclusion a ete
+# tiree dans des notes internes.
+#
+# A lancer quand la question se pose : changement de modele, de seuil, de
+# version d'onnxruntime, ou avant une publication.
+#
+#     gh workflow run mesure
+on:
+  workflow_dispatch:
+
+# Le code vit dans `programme/` : la racine du depot ne montre que les
+# lanceurs, le README et la licence.
+defaults:
+  run:
+    working-directory: programme
+
+jobs:
+  mesure:
+    name: ${{ matrix.modele }} · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # Un plafond, parce que la mesure peut etre tres longue : sur un Windows
+    # x86 reel, fp16 a mis 922 s pour un seul document. Un job qui atteint ce
+    # plafond est lui-meme une reponse.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Trois systemes et deux precisions, pour trancher une hypothese : la
+        # variante fp16 n'a pas de noyau onnxruntime sur CPU x86 et y est tres
+        # lente, alors qu'elle est native sur arm64 (macOS). fp32 doit y rendre
+        # les memes chiffres, bien plus vite. Chaque job affiche le temps par
+        # document : la comparaison se lit dans les journaux.
+        #
+        # Le quantifie int8 a ete retire : jamais 90 % de rappel.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        modele: [gliner-multi-pii-fp16, gliner-multi-pii-fp32]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Cache du modele
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/caviardoc/models
+            ~/Library/Application Support/caviardoc/models
+            ~/AppData/Local/caviardoc/models
+          key: modele-${{ runner.os }}-${{ matrix.modele }}-${{ hashFiles('programme/src/caviardoc/models.py') }}
+
+      - name: Installer le moteur
+        # Version epinglee : sans elle, `uv sync` prend le Python le plus
+        # recent disponible sur le runner, qui varie d'une plateforme et d'une
+        # semaine a l'autre.
+        run: uv sync --locked --python 3.12 --extra engine --extra documents --extra dev
+
+      - name: Telecharger le modele si absent
+        run: uv run --no-sync caviardoc setup --yes --modele ${{ matrix.modele }}
+
+      - name: Mesurer
+        # Sans `--seuils` : cette campagne compare deux precisions, elle ne
+        # garde pas une porte. Le verdict se lit dans le tableau, et le temps
+        # par document est ecrit en regard de chaque ligne.
+        run: uv run --no-sync python -u tools/mesurer.py --modele ${{ matrix.modele }} --details
+
+  # La mesure precedente porte sur le detecteur, sur du texte : rien n'y touche
+  # PyMuPDF, Tesseract ni les rectangles noirs. Celle-ci part du meme corpus
+  # mais fabrique un PDF rasterise, le passe par la chaine complete et relit le
+  # fichier produit. L'ecart entre les deux est la part du risque que la mesure
+  # du detecteur ne voit pas.
+  #
+  # Ubuntu seulement pour l'instant : `apt-get` installe Tesseract en quelques
+  # secondes la ou `brew` prend plusieurs minutes sur un runner macOS. Etendre
+  # a macOS reste souhaitable — le rendu et l'OCR different d'une plateforme a
+  # l'autre — mais un seul systeme mesure vaut mieux qu'aucun.
+  chaine:
+    name: Chaine complete · ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Installer Tesseract et une police vectorielle
+        # Le corpus contient des caracteres hors Latin-1 (« Œdeme ») que les
+        # polices de base d'un PDF ne savent pas encoder : sans police
+        # vectorielle, les pages fabriquees seraient fausses avant meme l'OCR.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-fra fonts-dejavu-core
+          tesseract --version | head -1
+          tesseract --list-langs
+
+      - name: Cache du modele
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/caviardoc/models
+          key: modele-Linux-gliner-multi-pii-fp32-${{ hashFiles('programme/src/caviardoc/models.py') }}
+
+      - name: Installer le moteur
+        run: uv sync --locked --python 3.12 --extra engine --extra documents --extra dev
+
+      - name: Telecharger le modele si absent
+        # fp32 : le modele conseille sur x86, ce que ce runner est.
+        run: uv run --no-sync caviardoc setup --yes --modele gliner-multi-pii-fp32
+
+      - name: Mesurer la chaine
+        run: uv run --no-sync python tools/mesurer_chaine.py --seuils --details

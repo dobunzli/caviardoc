@@ -1,0 +1,49 @@
+[project]
+name = "caviardoc"
+version = "0.1.0"
+description = "Caviardage de documents, local et multiplateforme"
+# Pas de `readme` : le README est a la racine du depot, un cran au-dessus,
+# et hatchling refuse un chemin hors de ce dossier. Le champ ne sert qu'a
+# la page PyPI, et le paquet n'y est pas publie.
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "D. Bünzli" }]
+
+# Le noyau (doctor, setup, info) n'a aucune dependance : il doit fonctionner
+# sur une machine neuve avec un Python nu.
+dependencies = []
+
+[project.optional-dependencies]
+# Moteur de detection. Installe hors du dossier synchronise.
+engine = [
+  "gliner>=0.2.13",
+  "onnxruntime>=1.20",
+  "torch>=2.2",
+]
+# Couche document, ajoutee a la phase 2.
+documents = [
+  "pymupdf>=1.24",
+  "python-docx>=1.1",
+  "openpyxl>=3.1",
+  "pytesseract>=0.3.10",
+  "zxing-cpp>=2.3",
+]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+caviardoc = "caviardoc.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/caviardoc"]
+
+[tool.pytest.ini_options]
+# Aucun cache ecrit dans le depot : il est synchronise entre machines et le
+# moindre fichier changeant a chaque execution genere des copies de conflit.
+addopts = "-p no:cacheprovider"
+testpaths = ["tests"]
