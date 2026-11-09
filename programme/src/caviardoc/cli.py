@@ -499,7 +499,8 @@ def cmd_caviarder(args: argparse.Namespace) -> int:
     from .revue import appliquer, avec_zones, preparer
     from .revue_web import servir
     from .roles import Niveau
-    from .noms import anonymiser_nom, nom_libre, renommer
+    from .noms import (AnonymiseurNoms, nom_libre, planifier_renommages,
+                       renommer, roles_des_noms)
 
     zones = OptionsZones(
         logos=args.logos,
@@ -537,6 +538,15 @@ def cmd_caviarder(args: argparse.Namespace) -> int:
     formats = frozenset({"pdf", "texte"} if args.format == "les-deux"
                         else {args.format})
     table = TablePseudonymes()
+    # Le dossier d'origine, s'il est commun au lot : il nomme souvent le patient
+    # et la specialite (« Avis_pneumologie/ »).
+    dossiers = {Path(f).absolute().parent.name for f in args.fichiers}
+    contexte = tuple(dossiers) if len(dossiers) == 1 else ()
+    # Un titre dans un nom de fichier (« Avis_Dresse_Negrel.pdf ») fait de la
+    # personne un medecin. La table l'apprend avant le premier document : le
+    # texte et le nom du fichier lui donnent alors le meme pseudonyme.
+    table.qualifier(roles_des_noms([Path(f).name for f in args.fichiers],
+                                   contexte), faible=True)
     # Les corrections retenues dans la console valent aussi ici : sans elles,
     # un nom appris resterait en clair dans la sortie du CLI. Relues a chaque
     # document, comme la console, pour que le lot profite de ce qui precede.
@@ -567,7 +577,8 @@ def cmd_caviarder(args: argparse.Namespace) -> int:
         return relire
 
     total_fuites = 0
-    a_renommer: list[Path] = []
+    #: (fichier produit sous son nom provisoire, nom d'origine).
+    a_renommer: list[tuple[Path, str]] = []
     echecs: list[tuple[str, str]] = []
 
     # Les copies temporaires de l'OCR vont dans un dossier a nous, efface a la
@@ -612,7 +623,7 @@ def cmd_caviarder(args: argparse.Namespace) -> int:
             traites += 1
             # Inscrit avant le traitement : une interruption en plein document
             # laisse un fichier partiel, qui ne doit pas garder le nom d'origine.
-            a_renommer.append(provisoire)
+            a_renommer.append((provisoire, chemin.name))
             try:
                 if est_docx:
                     rapport = caviarder_docx(model, chemin, provisoire,
@@ -696,21 +707,23 @@ def cmd_caviarder(args: argparse.Namespace) -> int:
         # Meme sur une interruption ou une erreur imprevue : les sorties deja
         # ecrites ne gardent pas le nom du document d'origine.
         print()
-        correspondances = table.correspondances
-        for provisoire in a_renommer:
-            for chemin in (provisoire, provisoire.with_suffix(".txt")):
-                if not chemin.exists():
-                    continue
-                try:
-                    nom_final = anonymiser_nom(chemin.name, correspondances,
-                                             personnes=table.formes_personnes)
-                    if nom_final != chemin.name:
-                        final = renommer(chemin, dest / nom_final)
-                        print(f"  {_propre(chemin.name)}\n    -> "
-                              f"{c(_propre(final.name), 'cyan')}")
-                except OSError as exc:
-                    print(c(_propre(f"  renommage impossible : {chemin.name} "
-                                f"({exc.strerror or exc})"), "red", "bold"))
+        # Le nom final part du nom d'origine, pas du nom provisoire et de son
+        # eventuel « (2) » ; les collisions sont numerotees « _2 », « _3 »…
+        anonymiseur = AnonymiseurNoms(table=table, contexte=contexte)
+        try:
+            plan = planifier_renommages(a_renommer, anonymiseur)
+        except OSError as exc:
+            plan = []
+            print(c(_propre(f"  renommage impossible ({exc.strerror or exc})"),
+                    "red", "bold"))
+        for chemin, voulu in plan:
+            try:
+                final = renommer(chemin, voulu)
+                print(f"  {_propre(chemin.name)}\n    -> "
+                      f"{c(_propre(final.name), 'cyan')}")
+            except OSError as exc:
+                print(c(_propre(f"  renommage impossible : {chemin.name} "
+                            f"({exc.strerror or exc})"), "red", "bold"))
 
     print()
     duree = duree_lisible(time.monotonic() - debut)

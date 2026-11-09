@@ -468,7 +468,7 @@ def nom_final(atelier: Atelier, nom: str) -> str:
     from .noms import anonymiser_nom
     table = atelier.table()
     return anonymiser_nom(nom, table.correspondances,
-                          personnes=table.formes_personnes)
+                          personnes=table.formes_personnes, table=table)
 
 
 def archiver(atelier: Atelier, identifiants, a_plat: bool = False) -> Production:
@@ -489,12 +489,13 @@ def archiver(atelier: Atelier, identifiants, a_plat: bool = False) -> Production
     if not choisis:
         raise KeyError("rien a archiver")
 
-    correspondances = atelier.table().correspondances
-    personnes = atelier.table().formes_personnes
+    table = atelier.table()
+    correspondances = table.correspondances
+    personnes = table.formes_personnes
 
     def anonyme(dossier: str) -> str:
         return "/".join(anonymiser_dossier(p, correspondances,
-                                           personnes=personnes)
+                                           personnes=personnes, table=table)
                         for p in dossier.split("/") if p)
 
     racines = {p.dossier.split("/")[0] for p in choisis}
@@ -678,7 +679,7 @@ def traiter(atelier: Atelier, identifiant: str, options: dict,
     """
     from .documents.caviardage import caviarder_pdf
     from .documents.docx import caviarder_docx
-    from .noms import anonymiser_nom, renommer
+    from .noms import anonymiser_nom, renommer, roles_des_noms
     from .pipeline import PolitiqueDates
     from .roles import Niveau
 
@@ -694,6 +695,10 @@ def traiter(atelier: Atelier, identifiant: str, options: dict,
 
     model = atelier.modele()
     table = atelier.table()
+    # Un titre dans le nom d'un fichier depose (« Avis_Dresse_Negrel.pdf »)
+    # fait de la personne un medecin, avant que le texte la nomme.
+    table.qualifier(roles_des_noms([d.nom for d in atelier.depots.values()]),
+                    faible=True)
     # Un repertoire par depot : deux « rapport.pdf » venus de deux
     # sous-dossiers ne doivent pas s'ecraser l'un l'autre.
     provisoire = atelier.sorties() / depot.identifiant / depot.nom
@@ -811,7 +816,8 @@ def traiter(atelier: Atelier, identifiant: str, options: dict,
         if not chemin.exists():
             continue
         final = chemin.parent / anonymiser_nom(chemin.name, correspondances,
-                                                    personnes=table.formes_personnes)
+                                                    personnes=table.formes_personnes,
+                                                    table=table)
         if final != chemin:
             final = renommer(chemin, final,
                              tache.journal if tache is not None else None)
@@ -3175,6 +3181,26 @@ function choisirOnglet(nom){
 }
 
 /* --- mise a jour ------------------------------------------------------ */
+function lienNotes(texte, url){
+  // L'adresse vient du serveur, qui n'en passe que de github.com ; on la
+  // revérifie ici et on construit le lien sans innerHTML.
+  const p = document.createElement('p');
+  if (typeof url !== 'string' || !url.startsWith('https://github.com/')) return p;
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.textContent = texte;
+  p.append(a);
+  return p;
+}
+function pNotesInstallee(hote, e){
+  if (!e.notes_installee) return;
+  const p = lienNotes("Notes de la version installée ("
+    + e.notes_installee.version + ")", e.notes_installee.url);
+  p.className = 'aide';
+  hote.append(p);
+}
 async function chargerMaj(){
   const hote = document.getElementById('maj');
   try {
@@ -3202,9 +3228,12 @@ async function chargerMaj(){
     if (!e.disponible){
       hote.append(phrase('aide', "Vous avez la dernière version"
         + (e.locale.date ? ', du ' + dateLisible(e.locale.date) : '') + '.'));
+      pNotesInstallee(hote, e);
       return;
     }
     hote.append(phrase('', "Une nouvelle version est disponible."));
+    if (e.notes) hote.append(lienNotes(
+      "Voir les nouveautés de la version " + e.notes.version, e.notes.url));
     if (e.changements && e.changements.length){
       const ul = document.createElement('ul');
       ul.className = 'aide';
@@ -3221,6 +3250,7 @@ async function chargerMaj(){
     b.textContent = "Mettre à jour";
     b.onclick = () => appliquerMaj(b);
     hote.append(b);
+    pNotesInstallee(hote, e);
   } catch (err) {
     hote.innerHTML = '';
     hote.append(phrase('aide', "Vérification impossible : " + err));
@@ -4362,7 +4392,7 @@ def servir(port: int = 0, ouvrir: bool = True, pret=None,
                                          compte=None)
                     return self._json(200, {"suivi": vue})
                 try:
-                    return self._json(200, module_maj.verifier().vue())
+                    return self._json(200, module_maj.vue_avec_notes(module_maj.verifier()))
                 except module_maj.MajImpossible as exc:
                     return self._json(200, {"erreur": str(exc)})
                 except Exception as exc:

@@ -591,6 +591,56 @@ def _github(chemin: str, delai: int = 30, introuvable: str = "") -> bytes:
     return corps
 
 
+#: Les seules adresses de notes de version transmises a l'interface.
+PREFIXE_NOTES = f"https://github.com/{DEPOT_GITHUB}/releases/"
+
+
+def _numeros(version: str) -> tuple[int, ...] | None:
+    """« v1.2.3 » -> (1, 2, 3) ; None si ce n'est pas une version numerique."""
+    version = version.strip().removeprefix("v")
+    if not re.fullmatch(r"\d+(\.\d+)*", version):
+        return None
+    return tuple(int(n) for n in version.split("."))
+
+
+def notes_installee() -> dict:
+    """Les notes de la version installee : adresse construite, sans reseau."""
+    from . import __version__
+    return {"version": __version__,
+            "url": f"{PREFIXE_NOTES}tag/v{__version__}"}
+
+
+def notes_nouvelle() -> dict | None:
+    """{version, url} de la derniere release si elle est plus recente.
+
+    Ne leve jamais : sans reponse exploitable, il n'y a simplement pas de
+    lien, et la verification de mise a jour n'en est pas touchee.
+    """
+    from . import __version__
+    try:
+        release = json.loads(_github("releases/latest", delai=10))
+        version = str(release.get("tag_name", "")).strip().removeprefix("v")
+        url = str(release.get("html_url", ""))
+        nouvelle, locale = _numeros(version), _numeros(__version__)
+        if (nouvelle is None or locale is None or nouvelle <= locale
+                or not url.startswith(PREFIXE_NOTES)):
+            return None
+        return {"version": version, "url": url}
+    except Exception:
+        return None
+
+
+def vue_avec_notes(etat: Etat) -> dict:
+    """`etat.vue()` et les liens vers les notes de version."""
+    vue = etat.vue()
+    vue["notes_installee"] = notes_installee()
+    if etat.disponible:
+        notes = notes_nouvelle()
+        if notes:
+            vue["notes"] = notes
+    return vue
+
+
 def _verifier_archive(reseau: bool) -> Etat:
     locale = commit_archive()
     if locale is None:

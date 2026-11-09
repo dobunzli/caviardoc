@@ -2,7 +2,7 @@
 
 from . import telemetrie as _telemetrie
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Avant tout import du moteur, par quelque point d'entree que ce soit : voir
 # `telemetrie`.

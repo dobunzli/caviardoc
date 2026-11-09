@@ -2,6 +2,8 @@
 
 import os
 import sys
+
+import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -271,3 +273,324 @@ class TestReclassementEtablissement:
         table = TablePseudonymes()
         assert table.pseudonyme("Groupe Mutuel", "assureur") == "ASSUREUR_1"
         assert "Groupe Mutuel" in table.correspondances
+
+
+# --------------------------------------------------------------------------- #
+# Noms d'un lot : personnes reliees, titres absorbes, mots proteges, patient,
+# collisions. Noms inventes.
+# --------------------------------------------------------------------------- #
+
+def _table_du_lot():
+    """La table d'un lot « Avis_pneumologie » : une pneumologue, un patient,
+    un etablissement, un assureur, et une detection « employeur » faite des
+    seuls mots « Service de pneumologie Dresse »."""
+    from caviardoc.engine import Span
+    from caviardoc.pseudonymes import TablePseudonymes
+    t = TablePseudonymes()
+    t.qualifier({"Dresse Véronique Negrel": ("medecin", "pneumologue"),
+                 "Jean-Bidule Zorglub": ("patient", "")})
+    t.enregistrer([Span(0, 1, "personne", 0.9, x) for x in (
+        "Dresse Véronique Negrel", "Negrel", "Véronique",
+        "Jean-Bidule Zorglub", "Zorglub")])
+    for texte, etiquette in (("Service de pneumologie Dresse", "employeur"),
+                             ("Hôpital de Pourtalès", "etablissement"),
+                             ("Groupe Mutuel", "assureur")):
+        t.pseudonyme(texte, etiquette)
+    return t
+
+
+#: Les douze noms du lot, et leur nom final une fois les collisions reglees.
+DOUZE = {
+    "Avis_pneumologique_ancien_dossier_Dresse_Negrel":
+        "Avis_pneumologique_ancien_dossier_MEDECIN_1_PNEUMOLOGUE",
+    "Pneumologie_Docteur_Veronique_Negrel": "Pneumologie_MEDECIN_1_PNEUMOLOGUE",
+    "Pneumologie_Dr_Veronique_Negrel": "Pneumologie_MEDECIN_1_PNEUMOLOGUE_5",
+    "pneumologie_Dresse_Negrel": "pneumologie_MEDECIN_1_PNEUMOLOGUE_6",
+    "Pneumologie_Dresse_Veronique_Negrel": "Pneumologie_MEDECIN_1_PNEUMOLOGUE_7",
+    "Pneumologie_Drsse_Veronique_Negrel": "Pneumologie_MEDECIN_1_PNEUMOLOGUE_8",
+    "Pneumologie_Dresse_Veronique_Negrel_2": "Pneumologie_MEDECIN_1_PNEUMOLOGUE_2",
+    "Pneumologie_Dresse_Veronique_Negrel_3": "Pneumologie_MEDECIN_1_PNEUMOLOGUE_3",
+    "Pneumologie_Dresse_Veronique_Negrel_4": "Pneumologie_MEDECIN_1_PNEUMOLOGUE_4",
+    "Cardiologie_Dr_Martin": "Cardiologie_MEDECIN_2_CARDIOLOGUE",
+    "Court_Cabinet": "Court_Cabinet",
+    "Rapport_Hopital_Pourtales": "Rapport_ETABLISSEMENT_1",
+}
+
+
+class TestNomsDuLot:
+    @pytest.mark.parametrize("nom, attendu", [
+        ("Avis_pneumologique_ancien_dossier_Dresse_Negrel.pdf",
+         "Avis_pneumologique_ancien_dossier_MEDECIN_1_PNEUMOLOGUE.pdf"),
+        ("Pneumologie_Docteur_Veronique_Negrel.pdf",
+         "Pneumologie_MEDECIN_1_PNEUMOLOGUE.pdf"),
+        ("Pneumologie_Dr_Veronique_Negrel.pdf",
+         "Pneumologie_MEDECIN_1_PNEUMOLOGUE.pdf"),
+        ("pneumologie_Dresse_Negrel.pdf", "pneumologie_MEDECIN_1_PNEUMOLOGUE.pdf"),
+        ("Pneumologie_Dresse_Veronique_Negrel.pdf",
+         "Pneumologie_MEDECIN_1_PNEUMOLOGUE.pdf"),
+        ("Pneumologie_Drsse_Veronique_Negrel.pdf",
+         "Pneumologie_MEDECIN_1_PNEUMOLOGUE.pdf"),
+        ("Pneumologie_Dresse_Veronique_Negrel_3.pdf",
+         "Pneumologie_MEDECIN_1_PNEUMOLOGUE_3.pdf"),
+        ("Court_Cabinet.pdf", "Court_Cabinet.pdf"),
+        ("Rapport_Hopital_Pourtales.pdf", "Rapport_ETABLISSEMENT_1.pdf"),
+        ("Decompte_Groupe_Mutuel.pdf", "Decompte_ASSUREUR_1.pdf"),
+        ("Lettre_Zorglub_Jean-Bidule.pdf", "Lettre_PATIENT.pdf"),
+        # La detection « employeur » sans nom propre ne remplace rien.
+        ("Lettre_Service_de_pneumologie_Dresse.pdf",
+         "Lettre_Service_de_pneumologie_Dresse.pdf"),
+    ])
+    def test_un_nom(self, nom, attendu):
+        assert anonymiser_nom(nom, table=_table_du_lot()) == attendu
+
+    def test_les_douze_noms_et_leurs_collisions(self, tmp_path):
+        import re
+        from caviardoc.noms import AnonymiseurNoms, planifier_renommages
+        documents = []
+        for nom in DOUZE:
+            (tmp_path / f"{nom}.pdf").write_text(nom)
+            documents.append((tmp_path / f"{nom}.pdf", f"{nom}.pdf"))
+        plan = planifier_renommages(
+            documents, AnonymiseurNoms(table=_table_du_lot()))
+        finaux = {s.stem: f.stem for s, f in plan}
+        sortie = {n: finaux.get(n, n) for n in DOUZE}
+        assert len({v.casefold() for v in sortie.values()}) == 12
+        assert not any("(" in f.name for _, f in plan)
+        # Le premier (ordre des originaux) a revendiquer un rang le garde.
+        premiers: dict[tuple[str, str], str] = {}
+        for nom in sorted(DOUZE, key=lambda n: (n.casefold(), n)):
+            m = re.match(r"(.*)_([234])$", nom)
+            if m:
+                famille = DOUZE[nom].rsplit("_", 1)[0]
+                premiers.setdefault((famille.casefold(), m.group(2)), nom)
+        assert premiers
+        for (_f, rang), nom in premiers.items():
+            assert sortie[nom].endswith("_" + rang)
+        # Un original sans rang obtient le nom nu.
+        assert sortie["Pneumologie_Docteur_Veronique_Negrel"] \
+            == "Pneumologie_MEDECIN_1_PNEUMOLOGUE"
+        assert sortie["Court_Cabinet"] == "Court_Cabinet"
+
+    def test_medecin_connu_du_seul_nom_rejoint_la_table(self):
+        """« Dr Martin » n'est nomme par aucun document : il recoit un
+        pseudonyme de medecin, que la table retient pour la suite."""
+        t = _table_du_lot()
+        assert (anonymiser_nom("Cardiologie_Dr_Martin.pdf", table=t)
+                == "Cardiologie_MEDECIN_2_CARDIOLOGUE.pdf")
+        assert t.pseudonyme("Dr Martin", "personne") == "MEDECIN_2_CARDIOLOGUE"
+        assert (anonymiser_nom("Martin_ordonnance.pdf", table=t)
+                == "MEDECIN_2_CARDIOLOGUE_ordonnance.pdf")
+
+    def test_medecin_sans_table_numerote_apres_les_autres(self):
+        corr = {"Negrel": "MEDECIN_1_PNEUMOLOGUE"}
+        assert (anonymiser_nom("Cardiologie_Dr_Martin.pdf", corr,
+                               personnes={"Negrel"})
+                == "Cardiologie_MEDECIN_2_CARDIOLOGUE.pdf")
+
+    def test_specialite_lue_dans_le_dossier(self):
+        from caviardoc.noms import AnonymiseurNoms
+        a = AnonymiseurNoms({}, contexte=("Avis_pneumologie",))
+        assert a.nom("Lettre_Pr_Tartempion.pdf") == "Lettre_MEDECIN_1_PNEUMOLOGUE.pdf"
+
+    @pytest.mark.parametrize("titre", [
+        "Dr", "DR", "dr.", "Dre", "Dresse", "Drsse", "Doctoresse", "Docteur",
+        "Pr", "Prof", "Professeur"])
+    def test_tout_titre_est_absorbe(self, titre):
+        out = anonymiser_nom(f"Pneumologie_{titre}_Negrel.pdf",
+                             table=_table_du_lot())
+        assert out == "Pneumologie_MEDECIN_1_PNEUMOLOGUE.pdf"
+
+    def test_employeur_mal_etiquete_n_avale_pas_le_medecin(self):
+        """Le cas reel : une detection « employeur » contenant la specialite
+        et le nom faisait « EMPLOYEUR_17_PERSONNE_3 »."""
+        t = _table_du_lot()
+        t.pseudonyme("Pneumologie Dresse Negrel", "employeur")
+        assert (anonymiser_nom("Avis_pneumologique_ancien_dossier_Dresse_Negrel.pdf",
+                               table=t)
+                == "Avis_pneumologique_ancien_dossier_MEDECIN_1_PNEUMOLOGUE.pdf")
+
+    def test_mot_protege_jamais_remplace(self):
+        corr = {"Avis Pneumologie Rapport": "EMPLOYEUR_1",
+                "Pneumologie": "PERSONNE_2"}
+        nom = "Avis_Pneumologie_Rapport.pdf"
+        assert anonymiser_nom(nom, corr, personnes={"Pneumologie"}) == nom
+
+    def test_pseudonymes_deja_poses_inchanges(self):
+        t = _table_du_lot()
+        for nom in ("Pneumologie_MEDECIN_1_PNEUMOLOGUE_2.pdf",
+                    "PATIENT_Lettre.pdf", "Rapport_ETABLISSEMENT_1.pdf"):
+            assert anonymiser_nom(nom, table=t) == nom
+
+    def test_nom_colle_en_camelcase(self):
+        assert (anonymiser_nom("AvisVeroniqueNegrel.pdf", table=_table_du_lot())
+                == "Avis_MEDECIN_1_PNEUMOLOGUE.pdf")
+
+    def test_homonyme_titre_du_patient_est_un_autre_medecin(self):
+        """Seul le patient porte « Zorglub » ; « Dr_Zorglub » est un medecin
+        homonyme, pas le patient."""
+        t = _table_du_lot()
+        out = anonymiser_nom("Cardiologie_Dr_Zorglub.pdf", table=t)
+        assert out == "Cardiologie_MEDECIN_2_CARDIOLOGUE.pdf"
+        assert anonymiser_nom("Zorglub_Lettre.pdf", table=t) == "PATIENT_Lettre.pdf"
+
+
+class TestPatientDuDossier:
+    @staticmethod
+    def _table(*noms):
+        from caviardoc.pseudonymes import TablePseudonymes
+        t = TablePseudonymes()
+        for nom, fois in noms:
+            for _ in range(fois):
+                t.pseudonyme(nom, "personne")
+        return t
+
+    def test_role_patient_des_documents(self):
+        t = _table_du_lot()
+        assert anonymiser_dossier("Zorglub Jean-Bidule", table=t) == "PATIENT"
+
+    def test_personne_nommee_par_le_dossier(self):
+        t = self._table(("Paul Tartempion", 1), ("Jean-Bidule Zorglub", 1))
+        assert (anonymiser_nom("Lettre_Zorglub.pdf", table=t,
+                               contexte=("Zorglub Jean-Bidule",))
+                == "Lettre_PATIENT.pdf")
+        assert (anonymiser_nom("Lettre_Tartempion.pdf", table=t,
+                               contexte=("Zorglub Jean-Bidule",))
+                == "Lettre_PERSONNE_1.pdf")
+
+    def test_la_plus_citee_seulement_pour_un_dossier(self):
+        t = self._table(("Paul Tartempion", 1), ("Jean-Bidule Zorglub", 3))
+        assert (anonymiser_nom("Lettre_Zorglub.pdf", table=t, contexte=("Lot",))
+                == "Lettre_PATIENT.pdf")
+        # Sans dossier commun, rien ne dit qui est le patient du lot.
+        assert anonymiser_nom("Lettre_Zorglub.pdf", table=t) == "Lettre_PERSONNE_2.pdf"
+
+    def test_egalite_pas_de_patient(self):
+        t = self._table(("Paul Tartempion", 2), ("Jean-Bidule Zorglub", 2))
+        assert (anonymiser_nom("Lettre_Zorglub.pdf", table=t, contexte=("Lot",))
+                == "Lettre_PERSONNE_2.pdf")
+
+    def test_un_medecin_n_est_jamais_le_patient(self):
+        from caviardoc.pseudonymes import TablePseudonymes
+        t = TablePseudonymes()
+        t.qualifier({"Dr Paul Tartempion": ("medecin", "")})
+        for _ in range(3):
+            t.pseudonyme("Dr Paul Tartempion", "personne")
+        assert (anonymiser_nom("Lettre_Tartempion.pdf", table=t, contexte=("Lot",))
+                == "Lettre_MEDECIN_1.pdf")
+
+
+class TestRolesDesNoms:
+    """Le titre lu dans un nom de fichier qualifie la personne avant le texte :
+    le texte et le nom du fichier portent le meme pseudonyme."""
+
+    def test_roles_lus_dans_les_noms(self):
+        from caviardoc.noms import roles_des_noms
+        roles = roles_des_noms(["Avis_pneumologique_ancien_dossier_Dresse_Negrel.pdf",
+                                "Pneumologie_Drsse_Veronique_Negrel_2.pdf",
+                                "Lettre_Dr_Martin.pdf", "Court_Cabinet.pdf"],
+                               ("Avis_cardiologie",))
+        assert roles == {"Negrel": ("medecin", "pneumologue"),
+                         "Veronique Negrel": ("medecin", "pneumologue"),
+                         "Martin": ("medecin", "cardiologue")}
+
+    def test_le_texte_suit_le_nom_du_fichier(self):
+        from caviardoc.noms import roles_des_noms
+        from caviardoc.pseudonymes import TablePseudonymes
+        t = TablePseudonymes()
+        t.qualifier(roles_des_noms(["Avis_pneumologique_Dresse_Negrel.pdf"]),
+                    faible=True)
+        # Le document nomme « Mme V. Negrel » sans la qualifier.
+        assert t.pseudonyme("Mme V. Negrel", "personne") == "MEDECIN_1_PNEUMOLOGUE"
+        assert (anonymiser_nom("Avis_pneumologique_Dresse_Negrel.pdf", table=t)
+                == "Avis_pneumologique_MEDECIN_1_PNEUMOLOGUE.pdf")
+        # Un autre porteur du patronyme n'est pas concerne.
+        assert t.pseudonyme("Paul Negrel", "personne") == "PERSONNE_1"
+
+    def test_le_role_des_documents_prime(self):
+        from caviardoc.pseudonymes import TablePseudonymes
+        t = TablePseudonymes()
+        t.qualifier({"Negrel": ("medecin", "pneumologue"),
+                     "Martin": ("medecin", "cardiologue")}, faible=True)
+        t.qualifier({"Dresse Negrel": ("medecin", ""),
+                     "Jean Martin": ("patient", "")})
+        # Medecin sans specialite dans le document : celle du nom s'ajoute.
+        assert t.pseudonyme("Dresse Negrel", "personne") == "MEDECIN_1_PNEUMOLOGUE"
+        assert t.pseudonyme("Jean Martin", "personne") == "PATIENT_1"
+
+
+class TestCollisions:
+    @staticmethod
+    def _plan(tmp_path, *noms, txt=()):
+        from caviardoc.noms import AnonymiseurNoms, planifier_renommages
+        documents = []
+        for provisoire, origine in noms:
+            (tmp_path / provisoire).write_text(provisoire)
+            documents.append((tmp_path / provisoire, origine))
+        for nom in txt:
+            (tmp_path / nom).write_text(nom)
+        return {s.name: f.name for s, f in planifier_renommages(
+            documents, AnonymiseurNoms({"Negrel": "MEDECIN_1"},
+                                       personnes={"Negrel"}))}
+
+    def test_fichier_existant_jamais_vise(self, tmp_path):
+        (tmp_path / "Avis_MEDECIN_1.pdf").write_text("ancien")
+        (tmp_path / "Avis_MEDECIN_1_2.pdf").write_text("ancien")
+        assert self._plan(tmp_path, ("Avis_Negrel.pdf", "Avis_Negrel.pdf")) == {
+            "Avis_Negrel.pdf": "Avis_MEDECIN_1_3.pdf"}
+
+    def test_le_texte_suit_son_document(self, tmp_path):
+        plan = self._plan(tmp_path, ("Avis_Dr_Negrel.pdf", "Avis_Dr_Negrel.pdf"),
+                          ("Avis_Negrel.pdf", "Avis_Negrel.pdf"),
+                          txt=("Avis_Negrel.txt",))
+        assert plan == {"Avis_Dr_Negrel.pdf": "Avis_MEDECIN_1.pdf",
+                        "Avis_Negrel.pdf": "Avis_MEDECIN_1_2.pdf",
+                        "Avis_Negrel.txt": "Avis_MEDECIN_1_2.txt"}
+
+    def test_nom_provisoire_entre_parentheses_oublie(self, tmp_path):
+        """« Lettre (2).docx » n'est qu'un nom provisoire : le nom final part
+        de l'original, et la collision se numerote « _2 »."""
+        plan = self._plan(tmp_path, ("Lettre.pdf", "Lettre.pdf"),
+                          ("Lettre (2).docx", "Lettre.docx"),
+                          txt=("Lettre.txt", "Lettre (2).txt"))
+        assert plan == {"Lettre (2).docx": "Lettre_2.docx",
+                        "Lettre (2).txt": "Lettre_2.txt"}
+
+    def test_la_casse_ne_distingue_pas(self, tmp_path):
+        plan = self._plan(tmp_path, ("avis_Negrel.pdf", "avis_Negrel.pdf"),
+                          ("Avis_Negrel_x.pdf", "Avis_Negrel.pdf"))
+        assert plan == {"Avis_Negrel_x.pdf": "Avis_MEDECIN_1.pdf",
+                        "avis_Negrel.pdf": "avis_MEDECIN_1_2.pdf"}
+
+
+class TestPersonneContreProtection:
+    """Un mot protege (Court, Long, Garde, Page, Famille) qui est le nom d'une
+    personne de la table est remplace : l'identite l'emporte."""
+
+    @staticmethod
+    def _table():
+        from caviardoc.engine import Span
+        from caviardoc.pseudonymes import TablePseudonymes
+        t = TablePseudonymes()
+        t.enregistrer([Span(0, 1, "personne", 0.9, x) for x in (
+            "Jean Court", "Marie Long", "Paul Garde", "Anne Page",
+            "Luc Famille")])
+        return t
+
+    @pytest.mark.parametrize("nom", [
+        "Rapport_Jean_Court", "Marie_Long_bilan", "Paul_Garde",
+        "Anne_Page_CR", "Luc_Famille"])
+    def test_le_nom_protege_d_une_personne_est_remplace(self, nom):
+        sortie = anonymiser_nom(nom + ".pdf", table=self._table())
+        for mot in ("Court", "Long", "Garde", "Page", "Famille"):
+            assert mot not in sortie, sortie
+        assert "PERSONNE_" in sortie
+
+    def test_le_mot_protege_sans_personne_reste(self):
+        t = _table_du_lot()
+        assert anonymiser_nom("Court_Cabinet.pdf", table=t) == "Court_Cabinet.pdf"
+        assert (anonymiser_nom("Rapport_Court_bilan.pdf", table=t)
+                == "Rapport_Court_bilan.pdf")
+
+    def test_specialite_reste_claire(self):
+        assert "Pneumologie" in anonymiser_nom(
+            "Pneumologie_Dr_Negrel.pdf", table=_table_du_lot())

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import threading
 import unicodedata
+from collections import Counter
 
 from .engine import est_personne
 from .noms import composants_du_nom, est_mot_etablissement, formes_canoniques, sans_titres, variantes
@@ -40,6 +41,16 @@ class TablePseudonymes:
         #: personne qualifiee recoit « MEDECIN_2_RHUMATOLOGUE » plutot que
         #: « PERSONNE_5 ».
         self._roles: dict[str, tuple[str, str]] = {}
+        #: Roles lus hors des documents — un titre dans un nom de fichier —,
+        #: indexes sur l'ensemble des prenoms et patronymes. Ils ne valent
+        #: qu'a defaut d'un role lu dans un document.
+        self._roles_faibles: dict[frozenset[str], tuple[str, str]] = {}
+        #: Professionnels connus du seul nom de fichier, homonymes d'une
+        #: personne non soignante deja nommee : ensemble des noms -> pseudonyme.
+        self._hors_texte: dict[frozenset[str], str] = {}
+        #: Pseudonyme -> nombre de fois ou il a ete demande : la mesure de ce
+        #: qu'une personne est citee dans le lot.
+        self._citations: Counter[str] = Counter()
         #: Personnes : nom entier (avec et sans titre) -> pseudonyme.
         self._personnes: dict[str, str] = {}
         #: Personnes : prenom ou patronyme -> pseudonymes de ceux qui le
@@ -62,18 +73,37 @@ class TablePseudonymes:
         with self._verrou:
             return frozenset(self._formes_personnes)
 
+    @property
+    def citations(self) -> dict[str, int]:
+        """Pseudonyme de personne -> nombre de demandes dans le lot."""
+        with self._verrou:
+            return dict(self._citations)
+
     def __len__(self) -> int:
         return len(self._table)
 
-    def qualifier(self, roles: dict[str, tuple[str, str]]) -> None:
+    def qualifier(self, roles: dict[str, tuple[str, str]],
+                  faible: bool = False) -> None:
         """Retient le role des personnes, avant qu'elles soient enregistrees.
 
         Le role ne s'applique qu'a un pseudonyme encore a creer : une personne
         deja nommee dans le lot garde le sien, sans quoi un meme medecin
         porterait deux noms d'un document a l'autre.
+
+        ``faible`` : role lu hors des documents, dans les noms de fichiers
+        (`noms.roles_des_noms`). Il vaut pour un nom fait des memes prenoms et
+        patronymes — « Negrel » vaut pour « Dresse Negrel » et « V. Negrel »,
+        pas pour « Paul Negrel » —, et seulement a defaut d'un role lu dans un
+        document ; il apporte aussi sa specialite a un medecin que le document
+        ne specialise pas.
         """
         with self._verrou:
             for texte, role in roles.items():
+                if faible:
+                    cle = _noms_de(texte)
+                    if cle:
+                        self._roles_faibles.setdefault(cle, role)
+                    continue
                 # Sous toutes ses formes entieres : le role est reconnu sur
                 # « M. Jean Dupont », le pseudonyme cree sur « Monsieur Jean
                 # Dupont ». Indexe sur la seule forme exacte, le patient
@@ -99,10 +129,11 @@ class TablePseudonymes:
             connu = next((self._table[c] for c, _ in cles if c in self._table),
                          None)
         if connu is None:
-            role = (next((self._roles[c] for c in _cles_entieres(texte)
-                          if c in self._roles), None) if personne else None)
+            role = self._role(texte) if personne else None
             connu = (self._nouveau(*role) if role
                      else self._nouveau(etiquette))
+        if personne:
+            self._citations[connu] += 1
         for c, forme in cles:
             if c:
                 self._table.setdefault(c, connu)
@@ -119,6 +150,40 @@ class TablePseudonymes:
                     if connu not in porteurs:
                         porteurs.append(connu)
         return connu
+
+    def _role(self, texte: str) -> tuple[str, str] | None:
+        """Role d'une personne a creer : celui des documents, sinon le faible."""
+        role = next((self._roles[c] for c in _cles_entieres(texte)
+                     if c in self._roles), None)
+        faible = self._roles_faibles.get(_noms_de(texte))
+        if role is None:
+            return faible
+        if (faible and role[0] == faible[0] == "medecin" and not role[1]
+                and faible[1]):
+            return role[0], faible[1]
+        return role
+
+    def professionnel_du_nom(self, texte: str, role: tuple[str, str]) -> str:
+        """Pseudonyme d'un professionnel nomme avec un titre dans un nom de
+        fichier, que les documents ne nomment pas.
+
+        Un nom inconnu est enregistre comme une personne du lot, avec ce role :
+        un document traite ensuite le nommera de meme. Un nom deja porte par
+        un professionnel rend ce professionnel. Un nom porte seulement par une
+        personne non soignante — le patient, un proche — designe un homonyme :
+        il recoit un pseudonyme a part, sans lien avec elle.
+        """
+        with self._verrou:
+            connu = self._personne_connue(texte)
+            if connu is None:
+                self.qualifier({texte: role}, faible=True)
+                return self._pseudonyme(texte, "personne")
+            if connu.startswith(("MEDECIN", "SOIGNANT")):
+                return connu
+            cle = _noms_de(texte) or frozenset({texte})
+            if cle not in self._hors_texte:
+                self._hors_texte[cle] = self._nouveau(*role)
+            return self._hors_texte[cle]
 
     def _personne_connue(self, texte: str) -> str | None:
         """Le pseudonyme d'une personne deja rencontree, ou None.
@@ -175,6 +240,12 @@ class TablePseudonymes:
     def rendre(self, span) -> str:
         """Texte de remplacement d'un span, entre crochets."""
         return f"[{self.pseudonyme(span.text.strip(), span.label)}]"
+
+
+def _noms_de(texte: str) -> frozenset[str]:
+    """Prenoms et patronymes d'un nom, sans ordre ni titre ni accents."""
+    return frozenset(formes_canoniques(n)[0] for n in composants_du_nom(texte)
+                     if formes_canoniques(n))
 
 
 def _cles_entieres(texte: str) -> list[str]:

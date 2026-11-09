@@ -1,6 +1,6 @@
 [project]
 name = "caviardoc"
-version = "0.1.0"
+version = "0.2.0"
 description = "Caviardage de documents, local et multiplateforme"
 # Pas de `readme` : le README est a la racine du depot, un cran au-dessus,
 # et hatchling refuse un chemin hors de ce dossier. Le champ ne sert qu'a
