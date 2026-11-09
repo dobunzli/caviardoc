@@ -30,8 +30,9 @@ from ..engine import Span, est_identifiant_direct
 from ..dates_relatives import ETIQUETTE as DATE_RELATIVE
 from ..dates_relatives import TableDatesRelatives, echelle
 from .. import tesseract
-from . import codes_barres
-from ..pipeline import (PolitiqueDates, _merge, analyse, analyse_detaillee,
+from . import codes_barres, manuscrit
+from ..pipeline import (DEFAULT_LABELS, DEFAULT_THRESHOLD, PolitiqueDates,
+                        _merge, analyse, analyse_detaillee, detections_modele,
                         propageable_sans_doute, quasi_identifiants, replier)
 from ..pseudonymes import TablePseudonymes
 from ..revue import CLE_ZONES
@@ -40,8 +41,8 @@ from ..roles import (Niveau, filtrer_par_role, noms_du_patient,
 from .commun import (assembler_texte as _assembler_texte, chaines_lisibles,
                      occurrences_relues, propageable, propager_chaines)
 from .fuites import Fuite, depuis_chaines
-from .ocr import (BLOC_COUCHE, PageOCR, completer, completer_par_la_page,
-                  couche_invisible, mots_depuis_couche_texte, ocr_page)
+from .ocr import (BLOC_COUCHE, CONFIANCE_EPARS, PageOCR, completer,
+                  completer_par_la_page, couche_invisible, mots_depuis_couche_texte, ocr_page)
 from .qualite import Nature, diagnostiquer
 from .structure_pdf import controler_structure, poser_mentions, sans_mentions
 from .zones import (OptionsZones, boites_supplementaires, spans_des_zones,
@@ -84,6 +85,13 @@ class RapportPage:
     #: Codes-barres et QR codes recouverts sur cette page. Une information, pas
     #: une reserve : le code est masque, il n'y a rien a aller verifier.
     codes_barres: int = 0
+    #: Ecritures manuscrites que l'OCR n'a pas lues, recouvertes sur cette
+    #: page. A verifier : on a masque sans savoir ce qu'elles disaient.
+    manuscrit: int = 0
+    #: Taches d'encre restees visibles qui pourraient etre une ecriture : ni
+    #: lues, ni masquees, ni reconnues comme grille, trace ou imprime. A
+    #: verifier a l'oeil, meme si rien n'a ete masque.
+    manuscrit_douteux: int = 0
 
 
 @dataclass
@@ -179,6 +187,18 @@ def _texte_de_zone(lecture, boite, limite: int = 60) -> str:
     """Le texte lu sous un rectangle, abrege, pour le reconnaitre en relecture."""
     texte = " / ".join(sp.text.strip() for sp in spans_des_zones(lecture, [boite]))
     return texte if len(texte) <= limite else texte[:limite - 1] + "…"
+
+
+def _couverte(boite, boites, part: float = 0.9) -> bool:
+    """``boite`` est-elle couverte, a ``part`` au moins, par l'une des
+    ``boites`` ?"""
+    x0, y0, x1, y1 = boite
+    surface = max(1e-9, (x1 - x0) * (y1 - y0))
+    for a0, b0, a1, b1 in boites:
+        w, h = min(x1, a1) - max(x0, a0), min(y1, b1) - max(y0, b0)
+        if w > 0 and h > 0 and w * h >= part * surface:
+            return True
+    return False
 
 
 def _noircir(image, boites) -> None:
@@ -406,6 +426,35 @@ def _lire_page(page, dpi: int, langue: str, rendu=None) -> tuple[PageOCR, str]:
     return couche, "couche texte"
 
 
+def _sur_mots_epars(span: Span, lecture: PageOCR) -> bool:
+    """Le span ne tient-il qu'a des mots lus a moins de `CONFIANCE_EPARS` ?"""
+    confiances = [m.confiance for m, (d, f) in zip(lecture.mots, lecture.offsets)
+                  if d < span.end and span.start < f]
+    return bool(confiances) and max(confiances) < CONFIANCE_EPARS
+
+
+def _sans_detections_eparses(model, lecture: PageOCR, kw_analyse: dict) -> dict:
+    """``kw_analyse``, avec les detections du modele privees de celles qui ne
+    reposent que sur des mots a peine lus.
+
+    Sur un electrocardiogramme scanne, l'OCR lit des bouts du trace a 0-35 %
+    et le modele les prend pour des noms : des aplats
+    noirs au milieu des courbes, et des noms « propages » qui n'existent pas.
+    Seules les detections du modele sont ecartees, et seulement quand chacun
+    des mots qu'elles touchent est sous le seuil ; une regle (somme de
+    controle, format) reste masquee, et un nom dont un mot au moins est lu
+    avec assurance aussi. Une couche texte, lue a 100 %, n'est pas touchee.
+    """
+    if model is None or kw_analyse.get("modele") is not None:
+        return kw_analyse
+    modele = detections_modele(
+        model, lecture.texte, kw_analyse.get("labels", DEFAULT_LABELS),
+        kw_analyse.get("threshold", DEFAULT_THRESHOLD),
+        kw_analyse.get("normalise_case", True))
+    return {**kw_analyse,
+            "modele": [sp for sp in modele if not _sur_mots_epars(sp, lecture)]}
+
+
 def caviarder_page(model, page, dpi: int = DPI, langue: str = "fra",
                    numero: int = 1, **kw_analyse):
     """Traite une page : rendu, OCR, detection, noircissement.
@@ -419,7 +468,8 @@ def caviarder_page(model, page, dpi: int = DPI, langue: str = "fra",
 
     spans: list[Span] = []
     if ocr.texte.strip():
-        spans = analyse(model, ocr.texte, **kw_analyse)
+        spans = analyse(model, ocr.texte,
+                        **_sans_detections_eparses(model, ocr, kw_analyse))
 
     boites = ocr.boites_pour(spans)
     if boites:
@@ -532,7 +582,9 @@ def analyser_page(model, page, dpi: int = DPI, langue: str = "fra",
     spans: list[Span] = []
     bruts: list[Span] = []
     if lecture.texte.strip():
-        spans, bruts = analyse_detaillee(model, lecture.texte, **kw_analyse)
+        spans, bruts = analyse_detaillee(
+            model, lecture.texte,
+            **_sans_detections_eparses(model, lecture, kw_analyse))
 
     rapport = RapportPage(numero=numero, mots_reconnus=len(lecture.mots),
                           confiance=lecture.confiance_moyenne, entites=spans,
@@ -751,13 +803,25 @@ def caviarder_pdf(model, source, sortie, dpi: int = DPI, langue: str = "fra",
             if "pdf" not in formats:
                 continue
 
+            # L'ecriture que l'OCR n'a pas lue, sur les pixels d'origine. Une
+            # page lue dans sa couche texte n'est pas un scan : rien a y
+            # chercher. Ce que les zones ou les entites couvrent deja n'est
+            # pas compte : il n'y a pas a le signaler.
+            boites = lecture.boites_pour(spans) + supplement
+            if rp.source.startswith("OCR"):
+                trouvees, douteuses = manuscrit.analyser(image, lecture, dpi)
+                ecritures = [b for b in trouvees if not _couverte(b, boites)]
+                rp.manuscrit = len(ecritures)
+                boites += ecritures
+                rp.manuscrit_douteux = sum(
+                    not _couverte(b, boites) for b in douteuses)
+
             # Les codes se cherchent dans la page rendue pour la sortie, la
             # meme que celle qu'on noircit : un code dessine en vectoriel y est
             # aussi des pixels. Avant les aplats de texte, sur les pixels
             # d'origine.
             rp.codes_barres = len(codes_barres.masquer(image))
 
-            boites = lecture.boites_pour(spans) + supplement
             if boites:
                 _noircir(image, boites)
             if libelles:

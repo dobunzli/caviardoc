@@ -78,6 +78,8 @@ class Categorie(str, Enum):
     IBAN = "IBAN"
     CARTE = "numero de carte"
     EMPLOYEUR = "employeur"
+    ETABLISSEMENT = "etablissement"
+    ASSUREUR = "assureur"
     DOSSIER = "numero de dossier"
     PATIENT = "numero de patient"
     IDENTIFIANT_DOSSIER = "identifiant de dossier"
@@ -94,7 +96,8 @@ class Categorie(str, Enum):
 IDENTIFIANTS_PERSONNELS = (Categorie.AVS, Categorie.PATIENT, Categorie.ASSURE)
 
 #: Etiquettes designant une organisation plutot qu'une personne.
-ORGANISATIONS = (Categorie.EMPLOYEUR,)
+ORGANISATIONS = (Categorie.EMPLOYEUR, Categorie.ETABLISSEMENT,
+                 Categorie.ASSUREUR)
 
 #: Quasi-identifiants : ce qui ne nomme personne, mais permet un recoupement.
 #: Un extrait d'arret caviarde, sans un seul nom — un cycliste, le Giro 2022,
@@ -173,7 +176,8 @@ def est_quasi_identifiant(label: str) -> bool:
 #: Categories qui n'identifient personne a elles seules, mais y contribuent
 #: une fois recoupees : une ville, un code postal, un employeur, une date qui
 #: n'est pas celle de naissance.
-CONTEXTUELLES = (Categorie.VILLE, Categorie.CODE_POSTAL, Categorie.EMPLOYEUR)
+CONTEXTUELLES = (Categorie.VILLE, Categorie.CODE_POSTAL, Categorie.EMPLOYEUR,
+                 Categorie.ETABLISSEMENT, Categorie.ASSUREUR)
 
 
 def est_contextuel(label: str) -> bool:

@@ -106,6 +106,22 @@ REMPLISSAGE_ENCRE = 0.12
 #: poussiere du scanner.
 COTE_ENCRE = 0.6
 
+#: Et au moins `COTE_ENCRE_MM` : une lettre imprimee, meme petite, en fait
+#: davantage. Sur un electrocardiogramme scanne, l'OCR ne tirait du trace que
+#: des bribes d'un millimetre : la « hauteur de mot » tombait si bas que les
+#: points de la grille et du liseré passaient pour de l'encre non lue, et
+#: plus de deux cents petits aplats couvraient bordure et legendes.
+COTE_ENCRE_MM = 1.2
+
+#: L'encre a moins de `PRES_D_UN_MOT` hauteurs de ligne d'un mot bien lu, sur
+#: une ligne que l'OCR a lue avec assurance (confiance mediane d'au moins
+#: `CONFIANCE_LUE`), et pas plus haute que `HAUTEUR_DE_LIGNE` fois cette
+#: ligne, est un reste de cette ligne imprimee (un signe, une lettre mal
+#: decoupee) : elle n'est pas masquee. Une ecriture plus haute, ou a l'ecart
+#: des mots lus, l'est toujours.
+PRES_D_UN_MOT = 0.5
+HAUTEUR_DE_LIGNE = 1.5
+
 #: Libelle de la case ou le soignant appose son timbre et signe
 #: (`boites_timbres`) : « Timbre et signature du medecin », « Cachet »,
 #: « Stempel und Unterschrift ».
@@ -274,12 +290,44 @@ def boites_encre_non_lue(image, lecture) -> list[tuple[float, float, float, floa
     if not largeur or not hauteur or not lecture.mots:
         return []
     encre, mot = _encre_inexpliquee(image, lecture)
+    cote_min = COTE_ENCRE_MM * lecture.dpi / 25.4
+    lues = _lignes_lues(lecture)
 
     boites: list[tuple[float, float, float, float]] = []
     for haut, bas in ((0, int(hauteur * HAUT_ENCRE)),
                       (int(hauteur * (1 - BAS_DE_PAGE)), hauteur)):
-        boites += _taches_d_encre(encre, (0, haut, largeur, bas), mot)
+        boites += [b for b in _taches_d_encre(encre, (0, haut, largeur, bas), mot)
+                   if min(b[2] - b[0], b[3] - b[1]) >= cote_min
+                   and not any(_reste_de_ligne(b, ligne) for ligne in lues)]
     return _fusionner(boites)
+
+
+def _lignes_lues(lecture) -> list[tuple[float, float, list]]:
+    """Les lignes lues avec assurance : (haut, bas, mots bien lus)."""
+    par_ligne: dict[tuple[int, int], list] = {}
+    for m in lecture.mots:
+        par_ligne.setdefault((m.bloc, m.ligne), []).append(m)
+    lues = []
+    for mots in par_ligne.values():
+        confiances = sorted(m.confiance for m in mots)
+        if confiances[len(confiances) // 2] < CONFIANCE_LUE:
+            continue
+        bien_lus = [m for m in mots if _bien_lu(m)]
+        if bien_lus:
+            lues.append((min(m.y0 for m in bien_lus),
+                         max(m.y1 for m in bien_lus), bien_lus))
+    return lues
+
+
+def _reste_de_ligne(boite, ligne) -> bool:
+    """La tache est-elle un reste de cette ligne imprimee, lue avec assurance ?"""
+    x0, y0, x1, y1 = boite
+    haut, bas, mots = ligne
+    h = bas - haut
+    if not haut <= (y0 + y1) / 2 <= bas or y1 - y0 > HAUTEUR_DE_LIGNE * h:
+        return False
+    ecart = PRES_D_UN_MOT * h
+    return any(x0 <= m.x1 + ecart and x1 >= m.x0 - ecart for m in mots)
 
 
 def boites_timbres(image, lecture) -> list[tuple[float, float, float, float]]:
@@ -395,11 +443,12 @@ def _fusionner(boites):
     return fusionnees
 
 
-def _taches(parts, seuil: float):
+def _taches(parts, seuil: float, portee: int = 2):
     """Groupes de cases voisines dont la part d'encre depasse ``seuil``.
 
     Deux cases separees d'une case vide restent dans la meme tache : les
     lettres d'un logo, ou son cadre et son contenu, ne forment qu'un tout.
+    ``portee`` 1 ne reunit que des cases qui se touchent.
     Rend, pour chaque tache, son rectangle en cases et son nombre de cases.
     """
     largeur, hauteur = parts.size
@@ -415,8 +464,8 @@ def _taches(parts, seuil: float):
         while pile:
             x, y = pile.pop()
             membres.append((x, y))
-            for dx in (-2, -1, 0, 1, 2):
-                for dy in (-2, -1, 0, 1, 2):
+            for dx in range(-portee, portee + 1):
+                for dy in range(-portee, portee + 1):
                     voisine = (x + dx, y + dy)
                     if voisine in pleines and voisine not in vues:
                         vues.add(voisine)
@@ -736,7 +785,7 @@ def spans_des_zones(lecture, boites) -> list[Span]:
     Chaque zone donne un span par suite continue de mots, de sorte qu'un logo
     se reduit a un seul pseudonyme plutot qu'a un par mot. Le score est nul :
     quand une detection recoupe la zone, c'est son etiquette qui l'emporte a la
-    fusion, celle d'« employeur » n'etant qu'un defaut.
+    fusion, celle d'« etablissement » n'etant qu'un defaut.
     """
     spans: list[Span] = []
     for boite in boites:
@@ -756,5 +805,5 @@ def spans_des_zones(lecture, boites) -> list[Span]:
 def _span_de_mots(lecture, indices: list[int]) -> Span:
     debut = lecture.offsets[indices[0]][0]
     fin = lecture.offsets[indices[-1]][1]
-    return Span(debut, fin, Categorie.EMPLOYEUR.value, 0.0,
+    return Span(debut, fin, Categorie.ETABLISSEMENT.value, 0.0,
                 lecture.texte[debut:fin], Origine.ZONE.value)

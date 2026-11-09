@@ -22,7 +22,8 @@ from .detect.generique import est_generique
 from .engine import (DEFAULT_LABELS, DEFAULT_THRESHOLD, QUASI_LABELS,
                      SEUIL_QUASI, Categorie, Origine, Span, apply_spans,
                      detect, resolve_overlaps)
-from .noms import SALUTATIONS, TITRES
+from .noms import (MOTS_ETABLISSEMENT, SALUTATIONS, TITRES,
+                   contient_mot_etablissement)
 from .normalise import normalise_casse
 from .roles import (MARQUEURS_PROFESSIONNEL, PORTEE_APRES,
                     SEPARATEUR_NAISSANCE, est_poste_soignant, est_professionnel)
@@ -110,9 +111,7 @@ _SEPARATEUR = re.compile(r"^[\s:;,.\u2013\u2014-]*$")
 #: Mots qui font d'un « nom » un etablissement. Le modele etiquette volontiers
 #: « personne » un « Cabinet Medical Dupont Martin » de pied de page, suivi de
 #: sa date d'impression : ce n'est pas un patient suivi de sa naissance.
-ETABLISSEMENTS = frozenset({"cabinet", "clinique", "hopital", "centre",
-                            "laboratoire", "institut", "service", "pharmacie",
-                            "groupe", "permanence"})
+ETABLISSEMENTS = MOTS_ETABLISSEMENT
 
 
 def _est_etablissement(nom: str) -> bool:
@@ -781,6 +780,67 @@ def filtrer_numeros_douteux(text: str, spans: list[Span]) -> list[Span]:
     return gardes
 
 
+#: Ce qu'il faut au moins, autour d'une detection du modele, pour qu'elle
+#: puisse etre un numero de ce format : (caracteres comptes, nombre). Un numero
+#: AVS fait 13 chiffres (756 et dix autres), un IBAN suisse 21 caracteres (le
+#: plus court au monde 15), une carte d'assure 20 chiffres ; les minimums
+#: tolerent quelques caracteres mal lus. Sur un electrocardiogramme scanne,
+#: des bouts de legende d'un a trois caracteres sortaient en « numero AVS »,
+#: et chacun posait un aplat noir sur le trace.
+FORMATS_MINIMAUX = {
+    "numero AVS": ("chiffres", 10),
+    "IBAN": ("alnum", 12),
+    "numero de carte": ("chiffres", 10),
+    "numero de telephone": ("chiffres", 6),
+    "email": ("alnum", 5),
+}
+
+
+def _autour(text: str, sp: Span, label: str) -> str:
+    """Les mots que touche le span, et ses voisins a chiffres d'un meme numero.
+
+    Un numero ecrit en groupes (« 756 1234 5678 97 ») peut sortir du modele en
+    morceaux : c'est le numero entier qu'on juge, pas le morceau. Une adresse
+    e-mail, d'un seul tenant, est jugee sur ses seuls mots.
+    """
+    mots = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+    touches = [i for i, (d, f) in enumerate(mots) if d < sp.end and sp.start < f]
+    if not touches:
+        return sp.text
+    debut, fin = touches[0], touches[-1]
+    if label != "email":
+        def numerique(i):
+            return any(c.isdigit() for c in text[mots[i][0]:mots[i][1]])
+        while debut > 0 and numerique(debut - 1) \
+                and "\n" not in text[mots[debut - 1][1]:mots[debut][0]]:
+            debut -= 1
+        while fin < len(mots) - 1 and numerique(fin + 1) \
+                and "\n" not in text[mots[fin][1]:mots[fin + 1][0]]:
+            fin += 1
+    return text[mots[debut][0]:mots[fin][1]]
+
+
+def filtrer_formats_impossibles(text: str, spans: list[Span]) -> list[Span]:
+    """Ecarte les detections du modele qui ne peuvent pas avoir le format de
+    leur etiquette : un « numero AVS » de deux chiffres n'en est pas un.
+
+    Seul le modele est juge ; une regle a verifie le format, et souvent la
+    somme de controle. Voir `FORMATS_MINIMAUX`.
+    """
+    gardes: list[Span] = []
+    for sp in spans:
+        format_ = FORMATS_MINIMAUX.get(sp.label)
+        if sp.origine == Origine.MODELE.value and format_ is not None:
+            compte, minimum = format_
+            autour = _autour(text, sp, sp.label)
+            n = sum(c.isdigit() if compte == "chiffres" else c.isalnum()
+                    for c in autour)
+            if n < minimum:
+                continue
+        gardes.append(sp)
+    return gardes
+
+
 #: Une prise d'un schema posologique : un chiffre, une fraction (« 1/2 »,
 #: « 0,5 ») ou un signe de fraction. Jamais deux chiffres : « 01-02-24 » est
 #: une date, pas une posologie.
@@ -922,6 +982,7 @@ def analyse(model, text: str,
     found = filtrer_dates(text, found, dates)
     found = filtrer_generiques(found)
     found = filtrer_numeros_douteux(text, found)
+    found = filtrer_formats_impossibles(text, found)
     found = filtrer_posologies(found)
 
     # --- ce que cette machine a retenu des relectures precedentes ----------
@@ -1029,7 +1090,16 @@ def _merge(spans: list[Span], texte: str) -> list[Span]:
         # Le texte doit refleter l'union, pas le span qui a donne l'etiquette :
         # la verification finale s'appuie dessus pour chercher d'eventuelles
         # chaines residuelles dans le document produit.
-        fusionnes.append(Span(debut, fin, chef.label, chef.score,
+        etiquette = chef.label
+        # Un « employeur » qui nomme un hopital, un cabinet, un laboratoire
+        # est un etablissement : le modele n'a qu'une etiquette pour les deux.
+        # Un assureur n'est pas un employeur non plus ; il est teste d'abord.
+        if etiquette == Categorie.EMPLOYEUR.value:
+            if rules.est_assureur(texte[debut:fin]):
+                etiquette = Categorie.ASSUREUR.value
+            elif contient_mot_etablissement(texte[debut:fin]):
+                etiquette = Categorie.ETABLISSEMENT.value
+        fusionnes.append(Span(debut, fin, etiquette, chef.score,
                               texte[debut:fin], chef.origine))
     return couper_aux_lignes_vides(texte, fusionnes)
 

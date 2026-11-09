@@ -21,6 +21,8 @@ from . import desinstallation, doctor, materiel, models, paths, tesseract
 from .doctor import Level
 from .documents import codes_barres
 from .documents.codes_barres import NOTE as NOTE_CODES_BARRES
+from .documents.manuscrit import NOTE as NOTE_MANUSCRIT
+from .documents.manuscrit import NOTE_DOUTE as NOTE_MANUSCRIT_DOUTEUX
 
 # --------------------------------------------------------------------------- #
 # Presentation
@@ -661,6 +663,12 @@ def cmd_caviarder(args: argparse.Namespace) -> int:
                           f"{page.boites} boites{zone} ({page.duree:.1f}s)")
                     if page.reserve:
                         print(c(_propre(f"       ! {page.reserve}"), "yellow"))
+                    if getattr(page, "manuscrit", 0):
+                        print(c(f"       ! {NOTE_MANUSCRIT} "
+                                f"({page.manuscrit})", "yellow"))
+                    if getattr(page, "manuscrit_douteux", 0):
+                        print(c(f"       ! {NOTE_MANUSCRIT_DOUTEUX} "
+                                f"({page.manuscrit_douteux})", "yellow"))
                     if getattr(page, "codes_barres", 0):
                         print(c(f"       {NOTE_CODES_BARRES} "
                                 f"({page.codes_barres})", "dim"))

@@ -19,7 +19,7 @@ import threading
 import unicodedata
 
 from .engine import est_personne
-from .noms import composants_du_nom, formes_canoniques, sans_titres, variantes
+from .noms import composants_du_nom, est_mot_etablissement, formes_canoniques, sans_titres, variantes
 
 
 class TablePseudonymes:
@@ -106,7 +106,8 @@ class TablePseudonymes:
         for c, forme in cles:
             if c:
                 self._table.setdefault(c, connu)
-                self._formes.setdefault(forme, connu)
+                if not est_mot_etablissement(forme):
+                    self._formes.setdefault(forme, connu)
                 if personne:
                     self._formes_personnes.add(forme)
         if personne:

@@ -129,10 +129,7 @@ est rejeté.
    (dans le texte, « cycliste professionnel » devient `[PROFESSION_1]`).
    Sans relecture, ils ne sont ni cherchés ni signalés.
 3. **Caviardez**, puis téléchargez le résultat (ou tout le dossier en .zip, avec
-   son arborescence). Un document que vous n'avez pas relu dans Caviardoc
-   (réglage **Sans relecture**, ou relecture des doutes quand il n'en avait
-   aucun) demande une confirmation : cochez « J'ai relu ce document » avant de
-   le copier ou de le télécharger.
+   son arborescence).
 
 Chaque document produit est relu automatiquement pour vérifier qu'aucune donnée
 masquée n'a survécu. Un document **non vérifié** est signalé comme tel.

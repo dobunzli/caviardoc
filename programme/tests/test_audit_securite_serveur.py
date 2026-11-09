@@ -187,7 +187,7 @@ def test_la_bonne_preuve_permet_d_envoyer_le_jeton():
     assert vus[-1] == ("/vivant", "jeton-secret")  # jeton apres la preuve
 
 
-# --- C3. verrou « relu » -----------------------------------------------------
+# --- C3. telechargement sans confirmation -----------------------------------------------------
 @pytest.fixture
 def console(monkeypatch, tmp_path):
     ateliers: list = []
@@ -213,10 +213,10 @@ def console(monkeypatch, tmp_path):
     base = f"{u.scheme}://{u.netloc}"
     jeton = urllib.parse.parse_qs(u.query)["jeton"][0]
     atelier = ateliers[0]
-    for ident, relu in (("lu", True), ("nonlu", False)):
+    for ident in ("lu", "nonlu"):
         f = tmp_path / f"{ident}.txt"
         f.write_text("contenu synthetique", encoding="utf-8")
-        atelier.productions[ident] = Production(ident, f.name, f, relu=relu)
+        atelier.productions[ident] = Production(ident, f.name, f)
     yield base, jeton
     arret.set()
     fil.join(timeout=10)
@@ -249,21 +249,15 @@ def test_la_preuve_est_servie_sans_jeton_et_correcte(console):
         assert r.read().decode() == web_commun.preuve_du_jeton(jeton, "abc", port)
 
 
-def test_telecharger_refuse_un_document_non_relu(console):
+def test_telecharger_ne_demande_aucune_confirmation(console):
     base, jeton = console
-    code, corps = _get(base, jeton, "/telecharger?id=nonlu")
-    assert code == 409 and "non relu" in corps.decode("utf-8")
-    assert _get(base, jeton, "/telecharger?id=nonlu&confirme=1")[0] == 200
+    assert _get(base, jeton, "/telecharger?id=nonlu")[0] == 200
     assert _get(base, jeton, "/telecharger?id=lu")[0] == 200
 
 
-def test_archive_refuse_un_document_non_relu(console):
+def test_archive_ne_demande_aucune_confirmation(console):
     base, jeton = console
-    code, corps = _archive(base, jeton, {"ids": ["lu", "nonlu"]})
-    assert code == 409 and "non relu" in corps.decode("utf-8")
-    assert _archive(base, jeton, {"ids": ["lu"]})[0] == 200
-    assert _archive(base, jeton, {"ids": ["lu", "nonlu"],
-                                  "confirme": True})[0] == 200
+    assert _archive(base, jeton, {"ids": ["lu", "nonlu"]})[0] == 200
 
 
 def test_une_preuve_relayee_depuis_une_autre_console_echoue(console, capsys):

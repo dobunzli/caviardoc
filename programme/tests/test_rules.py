@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from caviardoc.detect import rules  # noqa: E402
@@ -137,18 +139,47 @@ class TestSiteWeb:
 
 def test_noms_d_assureurs_masques_par_regle():
     from caviardoc.detect.rules import find_all
-    for nom in ("Assura", "assura", "CSS", "Helsana", "Swica", "Sanitas", "Concordia",
+    for nom in ("Assura", "assura", "CSS", "Helsana", "Swica", "Sanitas", "CONCORDIA",
                 "Visana", "Groupe Mutuel", "KPT", "Atupri", "ÖKK", "OKK", "Sympany",
-                "EGK", "Agrisano", "SUVA", "Sodalis", "Vivao", "Philos", "Avenir",
-                "Mutuel Assurance", "Easy Sana", "Supra", "Assura-Basis SA",
+                "EGK", "Agrisano", "SUVA", "Sodalis", "Vivao", "Philos", "Avenir Assurances",
+                "Mutuel Assurance", "Easy Sana", "Supra Krankenkasse", "Assura-Basis SA",
                 "CSS Assurance", "Helsana Assurances SA"):
         texte = f"Assure chez {nom}, merci."
-        m = [x for x in find_all(texte) if x.label == "employeur"]
+        m = [x for x in find_all(texte) if x.label == "assureur"]
         assert m and texte[m[0].start:m[0].end] == nom, nom
 
 
 def test_mots_courants_et_adresses_non_pris_pour_assureurs():
     from caviardoc.detect.rules import find_all
-    assert not [x for x in find_all("Il pense a l'avenir et au supra.") if x.label == "employeur"]
+    assert not [x for x in find_all("Il pense a l'avenir et au supra.") if x.label == "assureur"]
     for t in ("ecrire a info@assura.ch", "voir www.assura.ch"):
         assert len([x for x in find_all(t)]) == 1
+
+
+# --- Assureurs suisses (listes OFSP LAMal 1.10.2026 et LAA 2025) -------------
+
+@pytest.mark.parametrize("texte", [
+    "CSS", "CSS Kranken-Versicherung AG", "Assura-Basis SA", "Helsana",
+    "Helsana Versicherungen AG", "Visana", "SWICA", "Sanitas", "KPT", "EGK",
+    "ÖKK", "Sympany", "Vivao Sympany", "Atupri Gesundheitsversicherung AG",
+    "Agrisano", "Groupe Mutuel", "Mutuel Assurance", "Philos", "Easy Sana",
+    "Aquilana", "Suva", "Rhenusana", "SLKK", "Sodalis", "sana24",
+    "Zurich Assurances", "Zürich Versicherungs-Gesellschaft AG",
+    "Avenir Krankenversicherung AG", "Assurance Avenir", "CONCORDIA",
+    "Concordia Versicherung", "Progrès Assurances", "Emmental Versicherung",
+    "Krankenkasse Birchmeier", "Genossenschaft Krankenkasse Steffisburg",
+    "Caisse-maladie Supra", "Einsiedler Krankenkasse", "Smile Assurances",
+    "Solida Versicherungen AG", "PAX Versicherung",
+])
+def test_est_assureur_reconnu(texte):
+    assert rules.est_assureur(texte), texte
+
+
+@pytest.mark.parametrize("texte", [
+    "Zurich", "Zürich", "Avenir", "Concordia", "Progrès", "Emmental", "Supra",
+    "Simplon", "Glarner", "Wädenswil", "Visperterminen", "Steffisburg",
+    "Solida", "Smile", "PAX", "Birchmeier", "Cervino", "Lumneziana", "Galenos",
+    "css", "Dr Martin",
+])
+def test_est_assureur_ambigu_seul_refuse(texte):
+    assert not rules.est_assureur(texte), texte

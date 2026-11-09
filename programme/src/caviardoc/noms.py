@@ -47,6 +47,40 @@ def _cle(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", s.lower())
 
 
+#: Mots qui designent un genre d'etablissement sans en nommer aucun (sans
+#: accents, en minuscules).
+MOTS_ETABLISSEMENT = frozenset({
+    "cabinet", "clinique", "policlinique", "hopital", "hopitaux", "centre",
+    "laboratoire", "labo", "institut", "service", "pharmacie", "groupe",
+    "permanence", "ems"})
+
+#: Mots de `MOTS_ETABLISSEMENT` qui ne suffisent pas a faire d'un nom un
+#: etablissement : « Groupe Mutuel » est un assureur, donc un employeur.
+_AMBIGUS = frozenset({"groupe"})
+
+
+def _mots_sans_accents(forme: str) -> list[str]:
+    sans = "".join(c for c in unicodedata.normalize("NFKD", forme)
+                   if not unicodedata.combining(c))
+    return [m.lower() for m in re.findall(r"[^\W\d_]+", sans)]
+
+
+def est_mot_etablissement(forme: str) -> bool:
+    """Vrai si la forme n'est faite que de mots d'etablissement generiques.
+
+    « Cabinet » n'identifie personne : le substituer dans un nom de fichier
+    ou un texte masquerait un mot courant. « Cabinet Dupont » reste a masquer.
+    """
+    mots = _mots_sans_accents(forme)
+    return bool(mots) and all(m in MOTS_ETABLISSEMENT for m in mots)
+
+
+def contient_mot_etablissement(texte: str) -> bool:
+    """Vrai si le texte nomme un etablissement : « Hopital de Pourtales »."""
+    return any(m in MOTS_ETABLISSEMENT and m not in _AMBIGUS
+               for m in _mots_sans_accents(texte))
+
+
 #: Voyelles inflechies, transcrites comme on les ecrit sans clavier allemand.
 _TREMAS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue",
                          "Ä": "AE", "Ö": "OE", "Ü": "UE"})
@@ -132,6 +166,8 @@ def _anonymiser(tige: str, correspondances: dict[str, str],
     texte = unicodedata.normalize("NFC", tige)
     trouvailles: list[tuple[int, int, str]] = []
     for original, pseudonyme in correspondances.items():
+        if est_mot_etablissement(original):
+            continue
         if original in personnes:
             seuil = min(longueur_min, LONGUEUR_MIN_PERSONNE)
             # Chaque mot du nom : « Wu_Li » pour la personne « Li Wu ».

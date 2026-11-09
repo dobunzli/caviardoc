@@ -197,24 +197,74 @@ MOTIF_SITE = re.compile(
 
 
 #: Assureurs suisses : le nom designe l'assureur du patient, donc le patient ;
-#: il est masque quoi qu'en dise le modele, sous la categorie des employeurs
-#: (organismes). Casse et accents ignores pour les noms distinctifs ; une
-#: capitale initiale est exigee pour les mots courants (« avenir », « supra »).
-#: Un suffixe usuel (« -Basis », « Assurances », « SA ») est inclus. Les noms
-#: precedes de « @ », « . » ou « - » ou suivis de « .ch » (adresses, sites) sont
-#: laisses aux regles email et site.
+#: il est masque quoi qu'en dise le modele, sous la categorie des assureurs.
+#: Sources (donnees OFSP) : liste des assureurs-maladie admis au 1.10.2026
+#: (LAMal) et liste des assureurs-accidents 2025 (LAA). Pour chacun, la marque
+#: courte et le nom legal complet (suffixes ci-dessous) ; les noms de marque
+#: ajoutes hors liste (Easy Sana, Moove, Arcosana, Intras, Progres, Supra,
+#: Cervino, Lumneziana, Kolping, Simplon) suivent l'usage courant.
+#: Trois familles : noms distinctifs (seuls suffisent, casse et accents
+#: ignores), sigles (casse exacte) et noms ambigus (mot courant, lieu ou nom de
+#: famille), reconnus seulement avec un qualificatif d'assurance.
+
+#: Marques sans ambiguite (LAMal et LAA : Assura, Atupri, Helsana, Sanitas,
+#: Visana, Swica, Sympany, Vivao Sympany, Agrisano, OKK, Aquilana, Sodalis,
+#: Suva, Rhenusana, sana24, vita surselva, Philos, Mutuel, Sumiswalder...).
 _ASSUREURS_DISTINCTIFS = (
-    r"assura|css|helsana|swica|sanitas|concordia|visana|groupe[ \t]+mutuel|kpt|"
-    r"atupri|[öo]kk|sympany|egk|agrisano|suva|sodalis|vivao|"
-    r"mutuel[ \t]+assurance|easy[ \t]+sana"
+    r"assura|helsana|swica|sanitas|visana|groupe[ \t]+mutuel|atupri|[öo]kk|"
+    r"sympany|agrisano|suva|sodalis|vivao|aquilana|mutuel[ \t]+assurance|"
+    r"mutuel[ \t]+krankenversicherung|easy[ \t]+sana|moove|rhenusana|sana24|"
+    r"vita[ \t]+surselva|philos|arcosana|sumiswalder|curaulta|"
+    r"vall[ée]e[ \t]+d[’'][ \t]*entremont"
 )
-_ASSUREURS_COURANTS = r"Avenir|Philos|Supra"
+#: Sigles : casse exacte (CSS, KPT, EGK, SLKK ; CONCORDIA en capitales, tel
+#: qu'imprime par l'assureur, alors que « Concordia » est un nom commun).
+_ASSUREURS_SIGLES = r"CSS|KPT|EGK|SLKK|CONCORDIA"
+#: Qualificatif d'assurance, apres ou avant le nom.
+_QUALIF = (
+    r"assurances?(?:[- ]maladie)?|versicherung(?:en|s-?gesellschaft)?|"
+    r"kranken[- ]?(?:kasse|versicherung(?:en)?)|unfallversicherung(?:en)?|"
+    r"gesundheits-?versicherung(?:en)?|caisse[- ]maladie|kasse|"
+    r"assicurazion[ei]|insurance"
+)
+#: Noms ambigus de caisses (LAMal) et d'assureurs (LAA) : Avenir, Concordia,
+#: Galenos, Glarner, Birchmeier, Wadenswil, Visperterminen, Steffisburg,
+#: Luzerner Hinterland, Einsiedler, Simplon, Cervino, Lumneziana, Progres,
+#: Supra, Intras, Kolping, Zurich, Emmental, Solida, Smile, Elvia, PAX.
+_ASSUREURS_AMBIGUS = (
+    r"avenir|concordia|galenos|glarner|birchmeier|w[äa]denswil|"
+    r"visperterminen|steffisburg|luzerner[ \t]+hinterland|einsiedler|simplon|"
+    r"cervino|lumneziana|progr[èe]s|supra|intras|kolping|z[üu]rich|emmental|"
+    r"solida|smile|elvia|pax|branchen"
+)
+_LIEU = r"(?<![\w@.-])"
+_FIN = r"(?![\w@-]|\.\w)"
+_FORME = r"(?:[ \t]+(?:SA|AG|S\.A\.|S[àa]rl))?"
 MOTIF_ASSUREUR = re.compile(
-    r"(?<![\w@.-])"
-    r"(?:(?i:" + _ASSUREURS_DISTINCTIFS + r")|" + _ASSUREURS_COURANTS + r")"
-    r"(?:[- ](?i:basis|assurances?|versicherung(?:en)?|caisse[- ]maladie))?"
-    r"(?:[ \t]+(?:SA|AG|S\.A\.|S[àa]rl))?"
-    r"(?![\w@-]|\.\w)")
+    _LIEU + r"(?:"
+    r"(?:(?i:" + _ASSUREURS_DISTINCTIFS + r")|" + _ASSUREURS_SIGLES + r")"
+    r"(?:[- ](?i:basis|" + _QUALIF + r"))?" + _FORME + r"|"
+    # ambigu : nom puis qualificatif (« Zurich Assurances », « PAX Versicherung »)
+    r"(?i:" + _ASSUREURS_AMBIGUS + r")[ \t-]+(?i:" + _QUALIF + r")" + _FORME + r"|"
+    # ambigu : qualificatif puis nom (« Krankenkasse Birchmeier »,
+    # « Caisse-maladie de la Vallee », « Assurance Avenir »)
+    r"(?i:" + _QUALIF + r")[ \t]+(?i:(?:de[ \t]+(?:la[ \t]+)?)?"
+    + _ASSUREURS_AMBIGUS + r")" + _FORME +
+    r")" + _FIN)
+
+#: Autres assureurs (accident, choses, vie), reconnus seulement pour requalifier
+#: un « employeur » rendu par le modele, jamais comme regle autonome. « AXA »
+#: en capitales exactes ; « Zurich » seul est une ville (voir MOTIF_ASSUREUR).
+MOTIF_ASSUREUR_AUTRE = re.compile(
+    _LIEU + r"(?:(?i:allianz|generali|helvetia|vaudoise|mobili[èe]re|mobiliar|"
+    r"b[âa]loise|winterthur|hotela|elips[ \t]+life|frv)|AXA)" + _FIN)
+
+
+def est_assureur(texte: str) -> bool:
+    """Le texte nomme un assureur suisse connu."""
+    return bool(MOTIF_ASSUREUR.search(texte)
+                or MOTIF_ASSUREUR_AUTRE.search(texte))
+
 
 def valid_date_ecrite(raw: str) -> bool:
     """Le jour, s'il y en a un, existe : « 45 mars » n'est pas une date."""
@@ -253,7 +303,7 @@ RULES: tuple[Rule, ...] = (
     Rule("date", MOTIF_DATE_ECRITE, validate=valid_date_ecrite),
     Rule("date", MOTIF_DATE_COMPACTE, validate=valid_date_compacte),
     Rule("employeur", MOTIF_SITE),
-    Rule("employeur", MOTIF_ASSUREUR),
+    Rule("assureur", MOTIF_ASSUREUR),
 )
 
 

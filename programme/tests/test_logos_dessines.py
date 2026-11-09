@@ -187,6 +187,36 @@ class TestEncreNonLue:
                                       width=2)
         assert boites_encre_non_lue(img, _lecture(*CORPS)) == []
 
+    def test_points_d_un_liseré_ignores_meme_si_les_mots_sont_minuscules(self):
+        """Des bribes d'OCR d'un millimetre ne font pas passer les points
+        d'une bordure scannee pour de l'encre non lue."""
+        img = _feuille()
+        dessin = ImageDraw.Draw(img)
+        for x in range(100, 900, 40):
+            dessin.rectangle((x, 100, x + 8, 108), fill=(0, 0, 0))
+        bribes = [(100, 800 + 20 * i, 112, 810 + 20 * i) for i in range(9)]
+        assert boites_encre_non_lue(img, _lecture(*bribes)) == []
+
+    def _ligne_lue_et_reste(self, img):
+        """Une ligne imprimee lue avec assurance, et un signe colle a son
+        dernier mot que l'OCR n'a pas lu."""
+        dessin = ImageDraw.Draw(img)
+        dessin.rectangle((100, 60, 300, 84), fill=(20, 20, 20))
+        dessin.rectangle((306, 62, 322, 84), outline=(20, 20, 20), width=3)
+        return [(100, 60, 300, 84)]
+
+    def test_reste_d_une_ligne_lue_ignore(self):
+        img = _feuille()
+        lus = self._ligne_lue_et_reste(img)
+        assert boites_encre_non_lue(img, _lecture(*CORPS, *lus)) == []
+
+    def test_ecriture_haute_sur_une_ligne_lue_trouvee(self):
+        img = _feuille()
+        lus = self._ligne_lue_et_reste(img)
+        self._gribouillis(img, 330, 40)
+        boites = boites_encre_non_lue(img, _lecture(*CORPS, *lus))
+        assert len(boites) == 1 and boites[0][0] >= 322
+
 
 class TestTimbre:
     """Un timbre de medecin pale, pose de travers dans la case « Timbre et

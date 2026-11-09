@@ -259,8 +259,15 @@ class TestTexteDesZones:
                       ("Lacustre", 1, 10, 50), ("Corps", 2, 300, 300)])
         spans = spans_des_zones(page, [(0, 0, 100, 100)])
         assert [s.text for s in spans] == ["Réseau Hospitalier Lacustre"]
-        assert spans[0].label == "employeur"
+        assert spans[0].label == "etablissement"
         assert spans[0].origine == Origine.ZONE.value
+
+    def test_zone_d_entete_est_un_etablissement_numerote(self):
+        from caviardoc.pseudonymes import TablePseudonymes
+        page = _page([("Cabinet", 1, 10, 10)])
+        (span,) = spans_des_zones(page, [(0, 0, 100, 100)])
+        assert TablePseudonymes().pseudonyme(span.text, span.label) \
+            == "ETABLISSEMENT_1"
 
     def test_un_mot_a_peine_effleure_reste_lisible(self):
         """Une zone qui ne couvre qu'un bord du mot ne le masque pas."""

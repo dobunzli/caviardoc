@@ -93,9 +93,6 @@ class Production:
     #: Page muette, donnee identifiante restante, image illisible, verification
     #: impossible… : a regarder avant de transmettre. L'archive les range a part.
     a_verifier: bool = False
-    #: Le document a-t-il ete relu dans Caviardoc ? Sinon le serveur ne le livre
-    #: que sur confirmation explicite, comme la page le demande a l'ecran.
-    relu: bool = True
 
 
 #: Dossier de l'archive qui rassemble les documents a regarder, en tete de
@@ -152,11 +149,6 @@ class Tache:
     attente: float = 0.0
     #: Ce que la relecture a appris, tel que `exceptions.apprendre_de` le rend.
     lecons: dict | None = None
-    #: Le document a-t-il ete montre a la relecture, et valide ? Faux sans
-    #: relecture, et en relecture des doutes quand il n'en avait aucun : son
-    #: texte n'a alors ete lu par personne, et la page demande de confirmer
-    #: qu'il l'a ete avant de le livrer.
-    relu: bool = False
     #: Pages d'un PDF montrees pendant la relecture, par intitule. En memoire
     #: seulement, et videes des la validation : ce sont des images de patients.
     apercus: dict[str, "Apercu"] = field(default_factory=dict)
@@ -616,7 +608,6 @@ def crochet_de_relecture(atelier: Atelier, tache: Tache,
         tache.reprendre.wait()
         tache.attente += time.monotonic() - depart
         tache.verifier_arret()
-        tache.relu = True
 
         tache.etat = "en_cours"
         tache.noter("Application de vos décisions", 0.65)
@@ -654,7 +645,8 @@ def a_verifier(bilan: dict) -> bool:
     return bool(bilan["fuites"] or not bilan["verifie"]
                 or bilan["reserves"] or bilan["images_opaques"]
                 or bilan["images_metadonnees"] or bilan["repli_complet"]
-                or bilan.get("objets_retires") or bilan.get("sous_seuil"))
+                or bilan.get("objets_retires") or bilan.get("sous_seuil")
+                or bilan.get("manuscrit") or bilan.get("manuscrit_douteux"))
 
 
 def zones_du_niveau(options: dict, niveau) -> OptionsZones:
@@ -757,6 +749,16 @@ def traiter(atelier: Atelier, identifiant: str, options: dict,
         "attente": round(tache.attente if tache is not None else 0.0, 1),
         "reserves": [{"page": p.numero, "reserve": p.reserve}
                      for p in getattr(rapport, "pages", []) if p.reserve],
+        # Masquee sans avoir ete lue : on ne sait pas ce qu'elle disait, ni si
+        # tout est couvert. A regarder.
+        "manuscrit": [{"page": p.numero, "nombre": p.manuscrit}
+                      for p in getattr(rapport, "pages", [])
+                      if getattr(p, "manuscrit", 0)],
+        # Encre restee visible qui pourrait etre une ecriture : rien ne dit
+        # qu'elle ne porte pas un nom. A regarder, meme sans masque pose.
+        "manuscrit_douteux": [{"page": p.numero, "nombre": p.manuscrit_douteux}
+                              for p in getattr(rapport, "pages", [])
+                              if getattr(p, "manuscrit_douteux", 0)],
         "images_masquees": getattr(rapport, "images_masquees", 0),
         # Information seulement : les codes sont masques, rien a verifier.
         "codes_barres": (
@@ -789,9 +791,6 @@ def traiter(atelier: Atelier, identifiant: str, options: dict,
         # Objets incorpores (OLE, altChunk) retires faute de pouvoir les lire.
         "objets_retires": getattr(rapport, "objets", 0) if est_docx else 0,
         "fuites": fuites,
-        # Montre a la relecture et valide. Sinon, la page demande de confirmer
-        # que le document a ete relu avant de le copier ou de le telecharger.
-        "relu": bool(tache is not None and tache.relu),
         # Ce que la verification relisait encore et qui a ete noirci dans la
         # foulee. Ce ne sont plus des fuites, mais l'utilisateur doit savoir
         # que la detection avait laisse passer ces chaines.
@@ -819,8 +818,7 @@ def traiter(atelier: Atelier, identifiant: str, options: dict,
         jeton_fichier = secrets.token_hex(8)
         atelier.productions[jeton_fichier] = Production(
             jeton_fichier, final.name, final, depot.dossier,
-            a_verifier=douteux,
-            relu=bool(tache is not None and tache.relu))
+            a_verifier=douteux)
         bilan["produits"].append({"id": jeton_fichier, "nom": final.name,
                                   "taille": final.stat().st_size})
     return bilan
@@ -976,12 +974,6 @@ PREFIXE_ATELIER = "interface-"
 
 #: Fichier verrouille par la session qui occupe un atelier, tant qu'elle vit.
 MARQUE_VIVANT = ".vivant"
-
-#: Refus du serveur quand un document non relu est demande sans confirmation.
-MESSAGE_NON_RELU = (
-    "Document non relu dans Caviardoc : confirmez que vous l'avez relu "
-    "avant de le télécharger.").encode("utf-8")
-
 
 def _verrouiller(flux) -> bool:
     """Pose un verrou exclusif, sans attendre. Rend False s'il est deja pris.
@@ -1338,11 +1330,6 @@ background:var(--alerte-clair);color:var(--alerte)}
 display:flex;gap:10px;align-items:center}
 .rassurance p,.rassurance ul{margin:8px 0 0}
 .res-liens{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
-/* Non relu : une case a cocher avant de copier ou de telecharger. */
-.confirmer-relu{display:flex;gap:8px;align-items:flex-start;margin-top:9px;
-font-size:.86rem;cursor:pointer}
-.confirmer-relu input{margin:3px 0 0;flex:none}
-.confirmer-relu.a-cocher{color:var(--attention);font-weight:600}
 .telecharger{display:inline-flex;gap:6px;align-items:center;padding:5px 12px;
 border:1px solid var(--accent);border-radius:7px;color:var(--accent);
 text-decoration:none;font-size:.84rem;font-weight:600}
@@ -2036,9 +2023,8 @@ const AIDES = {
       + "violet). Un document sans aucun des deux est validé sans vous "
       + "déranger.",
     aucune: "Tout ce que l'outil trouve est masqué, sans que vous le voyiez. "
-      + "Avant de copier ou de télécharger un document, vous confirmerez "
-      + "l'avoir relu : ce qu'il raconte peut suffire à reconnaître la "
-      + "personne.",
+      + "Ce qu'un document raconte peut suffire à reconnaître la personne : "
+      + "lisez-le avant de le transmettre.",
   },
 };
 
@@ -2051,7 +2037,8 @@ function gravite(b){
   if (b.echec) return 'echec';
   const fuites = b.fuites || [];
   if (fuites.some(f => f.identifiante) || !b.verifie || b.sous_seuil) return 'alerte';
-  if (fuites.length || (b.reserves || []).length
+  if (fuites.length || (b.reserves || []).length || (b.manuscrit || []).length
+      || (b.manuscrit_douteux || []).length
       || (b.images_opaques || []).length || (b.images_metadonnees || []).length
       || b.objets_retires || b.repli_complet) return 'attention';
   return 'ok';
@@ -2838,6 +2825,19 @@ function rendre(b){
   for (const r of (b.reserves || []))
     corps.append(encart('fuite contexte',
       'Page ' + r.page + " : rien n'y a été détecté", r.reserve));
+  for (const m of (b.manuscrit || []))
+    corps.append(encart('fuite contexte',
+      'Page ' + m.page + ' : écriture manuscrite masquée, à vérifier',
+      "L'OCR n'a pas su la lire : elle a été recouverte (" + m.nombre
+      + " zone(s)) sans savoir ce qu'elle disait. Vérifiez qu'elle est "
+      + "entièrement couverte, et que rien d'utile ne l'a été."));
+  for (const m of (b.manuscrit_douteux || []))
+    corps.append(encart('fuite contexte',
+      'Écriture manuscrite possible non masquée (page ' + m.page
+      + "), à vérifier à l'œil",
+      "De l'encre est restée visible (" + m.nombre + " zone(s)) que l'OCR "
+      + "n'a pas lue et qui pourrait être une écriture : un nom écrit à la "
+      + "main sur la grille, par exemple. Regardez la page."));
   if (b.objets_retires)
     corps.append(encart('fuite contexte', b.objets_retires
       + ' objet(s) incorporé(s) retiré(s)',
@@ -2877,8 +2877,6 @@ function rendre(b){
   }
 
   const liens = el('div', 'res-liens');
-  const relu = confirmationDeRelecture(b);
-  if (relu.bloc && (b.produits || []).length) corps.append(relu.bloc);
   for (const p of (b.produits || [])){
     const lien = el('a', 'telecharger' + (graves.length ? ' risque' : ''));
     lien.dataset.base = '/telecharger?jeton=' + encodeURIComponent(JETON)
@@ -2886,11 +2884,6 @@ function rendre(b){
     lien.href = lien.dataset.base;
     lien.download = p.nom;
     lien.title = p.nom;
-    // Avant tout autre gestionnaire : un document non relu ne part pas.
-    lien.addEventListener('click', e => {
-      if (!relu.accorde()) e.preventDefault();
-      else lien.href = lien.dataset.base + relu.suffixe();
-    });
     lien.addEventListener('click', e => {
       if (e.defaultPrevented) return;
       telecharge = true;
@@ -2910,45 +2903,19 @@ function rendre(b){
     }
     liens.append(lien);
     if (extension(p.nom) === '.txt')
-      liens.append(boutonCopier(lien, graves, relu));
+      liens.append(boutonCopier(lien, graves));
   }
   if (liens.childElementCount) corps.append(liens);
   return bloc;
 }
-/* Un document que personne n'a relu ne se livre pas d'un clic : sans
-   relecture, ou en relecture des doutes quand il n'en avait aucun, son texte
-   n'a ete vu par personne. Or masquer les noms ne le rend pas anonyme : ce
-   qu'il raconte peut suffire a reconnaitre la personne. Une case a cocher,
-   une fois par document, avant de le copier ou de le telecharger. */
-function confirmationDeRelecture(b){
-  if (b.relu || b.echec)
-    return {bloc: null, accorde: () => true, suffixe: () => ''};
-  const bloc = el('label', 'confirmer-relu');
-  const c = el('input');
-  c.type = 'checkbox';
-  bloc.append(c, el('span', '', "J'ai relu ce document : ce qu'il raconte ne "
-    + "permet pas de reconnaître la personne."));
-  c.checked = Boolean(b.confirme);
-  c.addEventListener('change', () => {
-    b.confirme = c.checked;
-    bloc.classList.remove('a-cocher');
-  });
-  return {bloc: bloc, suffixe: () => c.checked ? '&confirme=1' : '', accorde: () => {
-    if (c.checked) return true;
-    bloc.classList.add('a-cocher');
-    c.focus();
-    return false;
-  }};
-}
 /* Certains outils n'acceptent pas de fichier : le texte s'y colle. Meme
    avertissement qu'au telechargement quand il identifie encore quelqu'un. */
-function boutonCopier(lien, graves, relu){
+function boutonCopier(lien, graves){
   const bouton = el('button', 'telecharger' + (graves.length ? ' risque' : ''));
   bouton.type = 'button';
   const libelle = document.createTextNode('Copier le texte');
   bouton.append(icone('copier'), libelle);
   bouton.addEventListener('click', async () => {
-    if (!relu.accorde()) return;
     if (graves.length && !confirm("Ce texte contient encore " + graves.length
         + " donnée(s) permettant de reconnaître la personne.\\n\\n"
         + "Copier quand même ?")) return;
@@ -3013,14 +2980,6 @@ async function toutTelecharger(){
   if (risques && !confirm(pluriel(risques, 'document contient', 'documents contiennent')
       + " encore des données permettant de reconnaître la personne.\\n\\n"
       + "Télécharger l'archive quand même ?")) return;
-  const aConfirmer = derniers.filter(b => !b.relu && !b.confirme
-                                    && (b.produits || []).length);
-  const nonRelus = aConfirmer.length;
-  if (nonRelus && !confirm(pluriel(nonRelus, "document n'a", "documents n'ont")
-      + " pas été relu" + (nonRelus > 1 ? "s" : "") + " dans Caviardoc.\\n\\n"
-      + "Confirmez que vous les avez relus : ce qu'un document raconte peut "
-      + "suffire à reconnaître la personne.")) return;
-  for (const b of aConfirmer) b.confirme = true;
   etatArchive('prepare');
   // Laisse le navigateur peindre l'indicateur avant le travail qui suit.
   await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -3028,7 +2987,7 @@ async function toutTelecharger(){
   try {
     const r = await fetch('/archive', {method:'POST',
       headers: entetes({'Content-Type':'application/json'}),
-      body: JSON.stringify({ids: ids, confirme: true,
+      body: JSON.stringify({ids: ids,
                             a_plat: !document.getElementById('optionPlat').hidden
                                     && document.getElementById('aPlat').checked})});
     if (!r.ok) throw new Error(await r.text());
@@ -4478,9 +4437,6 @@ def servir(port: int = 0, ouvrir: bool = True, pret=None,
                 produit = atelier.productions.get(voulu)
                 if produit is None or not produit.chemin.is_file():
                     return self.repondre(404, b"introuvable")
-                if not (produit.relu or parse_qs(adresse.query).get(
-                        "confirme", [""])[0] == "1"):
-                    return self.repondre(409, MESSAGE_NON_RELU)
                 return self.envoyer_fichier(produit.chemin,
                                             nom_final(atelier, produit.nom))
 
@@ -4729,11 +4685,6 @@ def servir(port: int = 0, ouvrir: bool = True, pret=None,
                 return self._json(200, {"efface": True})
 
             if chemin == "/archive":
-                if not charge.get("confirme") and any(
-                        not atelier.productions[i].relu
-                        for i in charge.get("ids") or []
-                        if isinstance(i, str) and i in atelier.productions):
-                    return self.repondre(409, MESSAGE_NON_RELU)
                 try:
                     archive = archiver(atelier, charge.get("ids") or [],
                                        a_plat=bool(charge.get("a_plat")))

@@ -125,6 +125,7 @@ class TestArchive:
         {"fuites": [{"identifiante": False}]},
         {"verifie": False},
         {"reserves": [{"page": 2, "reserve": "x"}]},
+        {"manuscrit": [{"page": 1, "nombre": 2}]},
         {"images_opaques": [{"nom": "a.png", "raison": "illisible"}]},
         {"images_metadonnees": ["a.png"]},
         {"repli_complet": True}])

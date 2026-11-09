@@ -134,6 +134,118 @@ def test_candidat_sans_structure_de_code_n_est_pas_noirci():
     assert codes_barres.compter(page) == 0
 
 
+#: Cinq blocs de caviardage empiles (374 x 224 px, noir et ebrechures), tels que
+#: rendus a 300 dpi : zxing y lit un DataMatrix a somme de controle fausse, sans
+#: aucun contenu. Aucune donnee de patient : ce ne sont que des aplats noirs.
+APLATS_EMPILES = (
+    "iVBORw0KGgoAAAANSUhEUgAAAXYAAADgAQAAAAA/bXAiAAAAdUlEQVR42u3YMQqAMBBFwa9Y"
+    "eicvZuHRPFggtqI2gkKUeZ1mCCmXTS7qSpJMy/lk7vNq4937eZ7neZ6/8Gtb7zEP8DzP87x5"
+    "o7F5Q5IkfaG1rX1C7Dd4nud5PvYb5g2e53me/5vfV44/pnqs3L1/qLuP+vz7N/c4G/mVvA5Z"
+    "AAAAAElFTkSuQmCC")
+
+
+def test_aplats_empiles_ni_comptes_ni_masques():
+    import base64
+    aplats = Image.open(io.BytesIO(base64.b64decode(APLATS_EMPILES))).convert("L")
+    page = Image.new("L", (1200, 1600), 255)
+    page.paste(aplats, (300, 500))
+    candidats = zxingcpp.read_barcodes(
+        page, try_rotate=True, try_downscale=True, try_invert=True,
+        return_errors=True)
+    assert candidats and all(
+        c.error and not c.bytes and not c.text for c in candidats)
+    # Un aplat n'a pas de modules : ni code a signaler a la verification, ni
+    # code a masquer. Le laisser ne change aucun pixel lisible.
+    assert codes_barres.compter(page) == 0
+    avant = page.copy()
+    assert codes_barres.masquer(page) == []
+    assert ImageChops.difference(avant, page).getbbox() is None
+
+
+def carre_d_etalonnage(page, x, y, cote=120, hauteur=148, grain=2):
+    """Le creneau d'etalonnage d'un ECG : un aplat noir, ebreche par le grain
+    d'un scan (un point clair sur vingt)."""
+    import random
+    from PIL import ImageDraw
+    hasard = random.Random(1)
+    dessin = ImageDraw.Draw(page)
+    dessin.rectangle([x, y, x + cote - 1, y + hauteur - 1], fill=0)
+    for _ in range(cote * hauteur // (grain * grain) // 20):
+        px = x + hasard.randrange(cote // grain) * grain
+        py = y + hasard.randrange(hauteur // grain) * grain
+        dessin.rectangle([px, py, px + grain - 1, py + grain - 1], fill=255)
+
+
+def grille_ecg(page, pas=12, gros_pas=60, gris=200):
+    """Une grille de papier millimetre : traits fins, et plus epais tous les
+    cinq."""
+    from PIL import ImageDraw
+    dessin = ImageDraw.Draw(page)
+    for x in range(0, page.width, pas):
+        dessin.line([(x, 0), (x, page.height)], fill=gris,
+                    width=3 if x % gros_pas == 0 else 1)
+    for y in range(0, page.height, pas):
+        dessin.line([(0, y), (page.width, y)], fill=gris,
+                    width=3 if y % gros_pas == 0 else 1)
+
+
+def candidats(image):
+    """Ce que zxing rend, sans aucun filtre, avec les deux binarisations."""
+    return [c for b in (zxingcpp.Binarizer.LocalAverage,
+                        zxingcpp.Binarizer.GlobalHistogram)
+            for c in zxingcpp.read_barcodes(
+                image, try_rotate=True, try_downscale=True, try_invert=True,
+                binarizer=b, return_errors=True)]
+
+
+@pytest.mark.parametrize("grille", [False, True])
+def test_ecg_ni_carres_d_etalonnage_ni_grille_masques(grille):
+    # Un ECG scanne : ses carres pleins etaient pris pour des DataMatrix en
+    # erreur, et agrandis passage apres passage jusque sur les legendes.
+    page = Image.new("L", (1600, 1200), 255)
+    if grille:
+        grille_ecg(page)
+    for x in (200, 700, 1200):
+        carre_d_etalonnage(page, x, 300)
+        carre_d_etalonnage(page, x, 800)
+    trouves = candidats(page)
+    assert trouves and all(
+        c.error and not c.bytes and not c.text for c in trouves)
+    avant = page.copy()
+    assert codes_barres.masquer(page) == []
+    assert ImageChops.difference(avant, page).getbbox() is None
+    assert codes_barres.compter(page) == 0
+
+
+def candidat_en(x0, y0, x1, y1):
+    """Un candidat factice dont les coins sont ceux du rectangle donne."""
+    from types import SimpleNamespace as N
+    return N(position=N(top_left=N(x=x0, y=y0), top_right=N(x=x1, y=y0),
+                        bottom_right=N(x=x1, y=y1), bottom_left=N(x=x0, y=y1)))
+
+
+def test_sans_modules_distingue_un_code_d_un_aplat_ou_d_une_grille():
+    page = datamatrix_elargi(1).convert("L")     # code en (300..436, 500..628)
+    fond = Image.new("L", page.size, 255)
+    grille_ecg(fond)
+    fond.paste(page.crop((280, 480, 457, 649)), (280, 480))
+    carre_d_etalonnage(fond, 700, 900)
+    # Le code, meme entoure de grille, garde ses modules.
+    assert not codes_barres._sans_modules(fond, candidat_en(296, 496, 440, 632))
+    # L'aplat, et la grille seule, n'en ont pas.
+    assert codes_barres._sans_modules(fond, candidat_en(700, 900, 819, 1047))
+    assert codes_barres._sans_modules(fond, candidat_en(60, 1000, 240, 1180))
+    # Et le code sur la grille est masque.
+    assert len(codes_barres.masquer(fond)) == 1
+    assert candidats(fond.crop((280, 480, 457, 649))) == []
+
+
+def test_code_abime_pale_reste_masque():
+    page = datamatrix_elargi(1).convert("L").point(lambda v: 150 + v * 105 // 255)
+    assert erreurs(page) == {str(zxingcpp.ErrorType.Checksum)}
+    assert len(codes_barres.masquer(page)) == 1
+
+
 def test_code_a_somme_de_controle_fausse_reste_masque():
     page = datamatrix_elargi(1)
     assert erreurs(page) == {str(zxingcpp.ErrorType.Checksum)}

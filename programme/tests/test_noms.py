@@ -218,3 +218,56 @@ class TestRenommer:
         voulu = tmp_path / "Lettre.docx"
         assert nom_libre(voulu) == voulu
         assert nom_libre(voulu, compagnons=(".txt",)) == tmp_path / "Lettre (2).docx"
+
+
+class TestMotEtablissementSeul:
+    def test_cabinet_seul_n_est_pas_substitue(self):
+        corr = {"Cabinet": "ETABLISSEMENT_1"}
+        assert anonymiser_nom("Court_Cabinet.pdf", corr) == "Court_Cabinet.pdf"
+        assert anonymiser_nom("Court_CABINET.pdf", corr) == "Court_CABINET.pdf"
+        assert anonymiser_nom("Court_Hôpital.pdf",
+                              {"Hôpital": "ETABLISSEMENT_1"}) == "Court_Hôpital.pdf"
+
+    def test_cabinet_avec_nom_reste_substitue(self):
+        corr = {"Cabinet Dupont": "ETABLISSEMENT_1"}
+        assert "Dupont" not in anonymiser_nom("Cabinet Dupont_Court.pdf", corr)
+
+    def test_la_table_ne_garde_pas_le_mot_seul(self):
+        from caviardoc.pseudonymes import TablePseudonymes
+        table = TablePseudonymes()
+        table.pseudonyme("Cabinet", "etablissement")
+        table.pseudonyme("Cabinet Dupont", "etablissement")
+        assert "Cabinet" not in table.correspondances
+        assert "Cabinet Dupont" in table.correspondances
+
+
+class TestReclassementEtablissement:
+    @staticmethod
+    def _etiquette(texte):
+        from caviardoc.engine import Span
+        from caviardoc.pipeline import _merge
+        (sp,) = _merge([Span(0, len(texte), "employeur", 0.9, texte)], texte)
+        return sp.label
+
+    def test_etablissements(self):
+        assert self._etiquette("Hôpital de Pourtalès") == "etablissement"
+        assert self._etiquette("Laboratoire Dr Risch") == "etablissement"
+        assert self._etiquette("EMS Les Lilas") == "etablissement"
+
+    def test_vrais_employeurs(self):
+        assert self._etiquette("Nestlé SA") == "employeur"
+        assert self._etiquette("Migros") == "employeur"
+
+    def test_assureurs(self):
+        for nom in ("Groupe Mutuel", "Assura", "CSS", "Helsana", "AXA",
+                    "Zurich Assurances", "Vaudoise Assurances"):
+            assert self._etiquette(nom) == "assureur", nom
+
+    def test_zurich_seul_n_est_pas_un_assureur(self):
+        assert self._etiquette("Zurich") == "employeur"
+
+    def test_assureur_non_generique_dans_la_table(self):
+        from caviardoc.pseudonymes import TablePseudonymes
+        table = TablePseudonymes()
+        assert table.pseudonyme("Groupe Mutuel", "assureur") == "ASSUREUR_1"
+        assert "Groupe Mutuel" in table.correspondances

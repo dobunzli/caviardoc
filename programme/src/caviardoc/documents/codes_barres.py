@@ -81,7 +81,9 @@ def _lire(image) -> list:
     meme (dimension, version) n'est pas celle d'un code, et aucun lecteur n'en
     tire quoi que ce soit. Des lignes de texte ordinaires en produisent — un
     « DataMatrix » de dimension impossible, large comme la page —, et le
-    recouvrir noircissait tout un paragraphe.
+    recouvrir noircissait tout un paragraphe. Sauf encore un candidat en
+    erreur et sans contenu qui n'a pas de modules (`_sans_modules`) : un aplat
+    noir, ou un bout de grille claire.
     """
     zx = _zxing()
     gris = image if image.mode == "L" else image.convert("L")
@@ -90,13 +92,57 @@ def _lire(image) -> list:
         trouves += zx.read_barcodes(
             gris, try_rotate=True, try_downscale=True, try_invert=True,
             binarizer=binariseur, return_errors=True)
-    return [c for c in trouves if not _sans_structure(c, zx)]
+    return [c for c in trouves if not _sans_structure(c, zx)
+            and not (_en_erreur_sans_contenu(c) and _sans_modules(gris, c))]
 
 
 def _sans_structure(code, zx) -> bool:
     """Le candidat a-t-il echoue des le format, sans rien livrer ?"""
     return (bool(code.error) and code.error.type == zx.ErrorType.Format
             and not code.bytes)
+
+
+#: Part de modules sombres d'un code, bornes comprises. Un code alterne modules
+#: noirs et blancs a parts a peu pres egales (pres de la moitie, abime ou pale
+#: compris) ; hors de ces bornes, le candidat n'a pas de modules a lire.
+MODULES_SOMBRES_MIN = 0.30
+MODULES_SOMBRES_MAX = 0.75
+
+
+def _sans_modules(gris, code) -> bool:
+    """Le rectangle du candidat est-il un aplat ou du papier, pas un code ?
+
+    Sur un electrocardiogramme scanne, les carres d'etalonnage pleins sont lus
+    comme des DataMatrix a somme de controle fausse, et un coin de la grille
+    claire aussi. Masques, chaque passage les agrandissait de sa marge, et les
+    passages suivants en trouvaient d'autres au bord des premiers : de gros
+    carres noirs sur les legendes. Un code abime garde ses modules ; ici, il
+    n'y en a pas : tout est sombre, ou presque tout est clair.
+
+    Le seuil est pris entre le plus clair et le plus sombre du rectangle, pour
+    qu'un code pale compte comme un code. Le filtre median efface le grain du
+    scan, des points clairs d'un pixel dans un aplat, sans toucher a un module.
+    Ne sert qu'aux candidats en erreur et sans contenu : un code decode est
+    masque quoi qu'il en soit.
+    """
+    from PIL import ImageFilter
+
+    x0, y0, x1, y1 = _brute(code)
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(gris.width, x1 + 1), min(gris.height, y1 + 1)
+    if x1 - x0 < 3 or y1 - y0 < 3:
+        return False
+    zone = gris.crop((x0, y0, x1, y1)).filter(ImageFilter.MedianFilter(3))
+    histogramme = zone.histogram()
+    total = sum(histogramme)
+    cumul, bornes = 0, []
+    for niveau, nombre in enumerate(histogramme):
+        cumul += nombre
+        while len(bornes) < 2 and cumul >= (0.02, 0.98)[len(bornes)] * total:
+            bornes.append(niveau)
+    seuil = (bornes[0] + bornes[1]) // 2
+    sombres = sum(histogramme[:seuil + 1]) / total
+    return not MODULES_SOMBRES_MIN <= sombres <= MODULES_SOMBRES_MAX
 
 
 def _brute(code) -> tuple[int, int, int, int]:
@@ -142,9 +188,24 @@ def boites(image) -> list[tuple[int, int, int, int]]:
             for c, b in _distincts(_lire(image))]
 
 
+def _en_erreur_sans_contenu(code) -> bool:
+    """Le candidat est-il en erreur, sans rien avoir livre ?
+
+    Au masquage, on le couvre quand meme : un code abime se lit parfois. A la
+    verification, il ne prouve rien : des aplats de caviardage empiles, noirs
+    et a peine ebreches, sont lus comme un DataMatrix a somme de controle
+    fausse et sans contenu, et signalaient un code qui n'existe pas.
+    """
+    return bool(code.error) and not code.bytes and not code.text
+
+
 def compter(image) -> int:
-    """Combien de codes l'image laisse-t-elle lisibles ? Sert a verifier."""
-    return len(_distincts(_lire(image)))
+    """Combien de codes l'image laisse-t-elle lisibles ? Sert a verifier.
+
+    Seuls comptent les candidats qui ont livre quelque chose.
+    """
+    return len(_distincts(
+        [c for c in _lire(image) if not _en_erreur_sans_contenu(c)]))
 
 
 def masquer(image) -> list[tuple[int, int, int, int]]:
