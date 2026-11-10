@@ -3221,11 +3221,12 @@ async function chargerMaj(){
       return;
     }
     peindreVersion(e);
-    if (e.empeche){
+    const retard = e.retard > 0;
+    if (e.empeche && !retard){
       hote.append(phrase('aide', e.empeche));
       return;
     }
-    if (!e.disponible){
+    if (!retard){
       hote.append(phrase('aide', "Vous avez la dernière version"
         + (e.locale.date ? ', du ' + dateLisible(e.locale.date) : '') + '.'));
       pNotesInstallee(hote, e);
@@ -3244,6 +3245,12 @@ async function chargerMaj(){
         ul.append(li);
       }
       hote.append(ul);
+    }
+    if (e.empeche){
+      // Mise a jour disponible mais bloquee : on dit pourquoi, sans bouton.
+      hote.append(phrase('aide', e.empeche));
+      pNotesInstallee(hote, e);
+      return;
     }
     const b = document.createElement('button');
     b.className = 'primaire';
@@ -3316,16 +3323,26 @@ function peindreSuiviMaj(s){
   }
   const c = s.compte || {};
   if (s.etat === 'fini' && c.applique){
-    hote.append(phrase('aide', 'Version ' + c.de + ' → ' + c.vers + '.'));
+    const revs = c.de + ' → ' + c.vers;
+    hote.append(phrase('aide', 'Version ' + (c.version_de && c.version_vers
+      ? c.version_de + ' → ' + c.version_vers + ' (' + revs + ')' : revs) + '.'));
     if (c.rappel_apres != null)
       hote.append(phrase('aide', 'Nouvelle mesure : '
         + c.rappel_apres.toFixed(1).replace('.', ',') + ' % des données de '
         + 'test repérées.'));
   }
-  if (c.regression)
+  if (s.etat === 'fini' && c.applique && c.mesure_comparable === false
+      && c.rappel_apres != null)
+    hote.append(phrase('aide', "Mesure précédente non comparable : "
+      + "nouvelle référence enregistrée."));
+  if (c.regression){
+    const pct = v => v.toFixed(1).replace('.', ',') + ' %';
+    const detail = (c.baisses || []).map(b => b.niveau + ' : '
+      + pct(b.avant) + ' → ' + pct(b.apres)).join(' ; ');
     hote.append(phrase('fuite', "Attention : sur cette machine, le modèle "
       + "retrouve désormais moins de données qu'avant la mise à jour ("
-      + c.rappel_avant.toFixed(1) + ' % → ' + c.rappel_apres.toFixed(1) + ' %).'));
+      + detail + ")."));
+  }
 }
 async function appliquerMaj(bouton){
   bouton.disabled = true;

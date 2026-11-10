@@ -103,6 +103,15 @@ def _sans_uv(monkeypatch):
                             "aucun test ne doit telecharger le modele"))
 
 
+def _noter_complet(complet, patient, corpus="c1"):
+    """Un releve complet, tel que `tools/mesurer.py --enregistrer` l'ecrit."""
+    from caviardoc import models
+    models.noter_mesure(models.modele_actif(),
+                        {"rappel_complet": complet / 100,
+                         "rappel_patient": patient / 100},
+                        True, corpus=corpus)
+
+
 def _nouveau_commit(distant, message="Deuxieme commit"):
     (distant / "fichier.txt").write_text("deuxieme\n")
     _git(distant, "add", "-A")
@@ -146,6 +155,38 @@ class TestVerifier:
         assert not etat.propre
         assert "écraserait" in etat.empeche
         assert not etat.disponible
+
+    def test_un_fichier_non_suivi_n_empeche_pas_la_maj(self, installe):
+        distant, local = installe
+        _nouveau_commit(distant)
+        (local / ".claudeignore").write_text("perso\n")
+
+        etat = maj.verifier()
+        assert etat.propre
+        assert not etat.empeche
+        assert etat.disponible
+
+    def test_un_fichier_suivi_modifie_garde_le_retard_visible(self, installe):
+        distant, local = installe
+        _nouveau_commit(distant)
+        (local / "fichier.txt").write_text("modifie a la main\n")
+
+        etat = maj.verifier()
+        assert "écraserait" in etat.empeche
+        assert etat.retard == 1
+        assert etat.changements
+        assert not etat.disponible
+
+    def test_un_non_suivi_qui_serait_ecrase_est_dit_clairement(self, installe):
+        distant, local = installe
+        (distant / "nouveau.txt").write_text("du depot\n")
+        _git(distant, "add", "-A")
+        _git(distant, "commit", "--quiet", "-m", "Ajoute nouveau.txt")
+        (local / "nouveau.txt").write_text("a moi\n")
+
+        with pytest.raises(MajImpossible, match="porte le même nom"):
+            maj.appliquer(remesurer=False)
+        assert (local / "nouveau.txt").read_text() == "a moi\n"
 
     def test_verifier_ne_modifie_rien(self, installe):
         distant, local = installe
@@ -220,17 +261,17 @@ class TestRappel:
         assert maj.dernier_rappel() is None
 
     def test_une_baisse_de_rappel_est_signalee(self, installe, monkeypatch):
-        """C'est la raison d'etre de la remesure."""
+        """C'est la raison d'etre de la remesure ; elle nomme le niveau."""
         distant, _ = installe
         _nouveau_commit(distant)
         _sans_uv(monkeypatch)
-        maj.noter_rappel(97.3)
+        _noter_complet(97.3, 97.3)
 
         def mesure_degradee(journal=None):
             # Le vrai `mesurer` enregistre lui-meme, par `--enregistrer` :
             # le leurre doit en faire autant, sans quoi le test verifierait
             # une chaine que la realite ne suit plus.
-            maj.noter_rappel(62.2)
+            _noter_complet(97.3, 62.2)
             return 62.2
 
         monkeypatch.setattr(maj, "mesurer", mesure_degradee)
@@ -240,6 +281,9 @@ class TestRappel:
         assert compte["rappel_avant"] == 97.3
         assert compte["rappel_apres"] == 62.2
         assert compte["regression"] is True
+        assert compte["mesure_comparable"] is True
+        assert compte["baisses"] == [
+            {"niveau": "patient", "avant": 97.3, "apres": 62.2}]
         assert maj.dernier_rappel() == 62.2
 
     def test_un_rappel_stable_ne_declenche_pas_dalerte(self, installe,
@@ -247,11 +291,41 @@ class TestRappel:
         distant, _ = installe
         _nouveau_commit(distant)
         _sans_uv(monkeypatch)
-        maj.noter_rappel(97.3)
-        monkeypatch.setattr(maj, "mesurer", lambda journal=None: 97.3)
+        _noter_complet(97.3, 95.0)
+        monkeypatch.setattr(maj, "mesurer", lambda journal=None: 95.0)
 
         compte = maj.appliquer(remesurer=True)
         assert compte["regression"] is False
+        assert compte["mesure_comparable"] is True
+
+    @pytest.mark.parametrize("avant", [
+        {"rappel_complet": 97.0, "rappel_patient": 97.0},        # sans corpus
+        {"rappel_complet": 97.0, "corpus": "c1"},                # incomplet
+        {"rappel_complet": 97.0, "rappel_patient": 97.0,
+         "corpus": "autre"},                                     # autre corpus
+        {"rappel_complet": 97.0, "rappel_patient": 97.0,
+         "corpus": "c1", "modele": "autre-modele"},              # autre modele
+    ])
+    def test_une_mesure_non_comparable_ne_donne_pas_dalerte(
+            self, installe, monkeypatch, avant):
+        """Le cas reel : 97 % notes par un test, 95 % mesures ensuite."""
+        from caviardoc import models
+        distant, _ = installe
+        _nouveau_commit(distant)
+        _sans_uv(monkeypatch)
+        models._ecrire_etat({models.CLE_ETAT_MESURE: {
+            "modele": models.modele_actif(), "tenu": True, **avant}})
+
+        def mesure(journal=None):
+            _noter_complet(95.0, 95.0)
+            return 95.0
+
+        monkeypatch.setattr(maj, "mesurer", mesure)
+
+        compte = maj.appliquer(remesurer=True)
+        assert compte["mesure_comparable"] is False
+        assert compte["regression"] is False
+        assert compte["baisses"] == []
 
     def test_sans_mesure_precedente_aucune_regression(self, installe,
                                                       monkeypatch):
@@ -263,6 +337,57 @@ class TestRappel:
         compte = maj.appliquer(remesurer=True)
         assert compte["rappel_avant"] is None
         assert compte["regression"] is False
+
+
+class TestEmpreinte:
+    def test_la_mesure_porte_l_empreinte_du_corpus(self, installe):
+        import hashlib
+        from caviardoc import models
+        attendu = hashlib.sha256(
+            (maj.paths.project_root() / "tests" / "corpus"
+             / "corpus.json").read_bytes()).hexdigest()
+        assert maj.empreinte_corpus() == attendu
+        _noter_complet(97.0, 95.0, corpus=attendu)
+        assert models.derniere_mesure()["corpus"] == attendu
+
+    def test_sans_corpus_pas_d_empreinte(self, tmp_path):
+        assert maj.empreinte_corpus(tmp_path) is None
+
+
+class TestVersions:
+    def test_la_version_se_lit_dans_le_fichier(self, tmp_path):
+        assert maj.version_du_code(tmp_path) == ""
+        (tmp_path / "src" / "caviardoc").mkdir(parents=True)
+        (tmp_path / "src" / "caviardoc" / "__init__.py").write_text(
+            '"""x"""\n__version__ = "1.2.3"\n')
+        assert maj.version_du_code(tmp_path) == "1.2.3"
+
+    def test_le_tag_de_la_cible_donne_sa_version(self, installe, monkeypatch):
+        distant, _ = installe
+        _nouveau_commit(distant)
+        _git(distant, "tag", "v9.8.7")
+        _sans_uv(monkeypatch)
+
+        compte = maj.appliquer(remesurer=False)
+        assert compte["version_vers"] == "9.8.7"
+        assert compte["version_de"] == maj.version_du_code()
+
+    def test_sans_tag_la_version_du_code_sert_de_repli(self, installe,
+                                                       monkeypatch):
+        distant, _ = installe
+        _nouveau_commit(distant)
+        _sans_uv(monkeypatch)
+
+        compte = maj.appliquer(remesurer=False)
+        assert compte["version_vers"] == maj.version_du_code()
+
+    def test_une_version_illisible_ne_fait_pas_echouer(self, monkeypatch):
+        def casse(*a, **kw):
+            raise RuntimeError("git absent")
+        monkeypatch.setattr(maj, "_git", casse)
+        monkeypatch.setattr(maj, "est_un_depot", lambda: True)
+        monkeypatch.setattr(maj, "version_du_code", casse)
+        assert maj.version_de_la_cible("abc1234") == ""
 
 
 class TestCli:

@@ -169,7 +169,11 @@ def verifier(reseau: bool = True) -> Etat:
 
     etat = Etat(locale=_revision("HEAD"))
 
-    sale = _git("status", "--porcelain")
+    # Les fichiers non suivis (un `.claudeignore` perso) n'empechent rien :
+    # seul un fichier suivi et modifie serait ecrase. Si un nouveau commit
+    # devait ecraser un fichier non suivi, `merge --ff-only` refuse (voir
+    # `appliquer_code`).
+    sale = _git("status", "--porcelain", "--untracked-files=no")
     etat.propre = not sale.stdout.strip()
     if not etat.propre:
         etat.empeche = (
@@ -256,6 +260,76 @@ def noter_rappel(valeur: float) -> None:
     models.noter_mesure(models.modele_actif(),
                         {"rappel_complet": float(valeur) / 100},
                         tenu=float(valeur) >= 90.0)
+
+
+NIVEAUX_MESURE = (("rappel_complet", "complet"), ("rappel_patient", "patient"))
+
+#: Baisse tolerable entre deux mesures (points de pourcentage).
+TOLERANCE_RAPPEL = 0.5
+
+
+def empreinte_corpus(racine: Path | None = None) -> str | None:
+    """sha256 du corpus de mesure, ou None s'il n'est pas sur cette machine."""
+    import hashlib
+    fichier = ((racine or paths.project_root())
+               / "tests" / "corpus" / "corpus.json")
+    try:
+        return hashlib.sha256(fichier.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def comparer_mesures(avant: dict | None, apres: dict | None) -> dict:
+    """Compare deux releves, niveau par niveau.
+
+    Rend ``{"comparable": bool, "baisses": [...]}``. Deux releves ne se
+    comparent que s'ils sont complets (les deux rappels), pris sur le meme
+    corpus (empreinte) et avec le meme modele : sinon l'ecart ne dit rien du
+    code, et l'annoncer serait une fausse alerte.
+    """
+    def complet(m) -> bool:
+        return (isinstance(m, dict) and all(
+            isinstance(m.get(cle), (int, float)) for cle, _ in NIVEAUX_MESURE))
+
+    if not (complet(avant) and complet(apres) and avant.get("corpus")
+            and avant.get("corpus") == apres.get("corpus")
+            and avant.get("modele") == apres.get("modele")):
+        return {"comparable": False, "baisses": []}
+    baisses = [{"niveau": nom, "avant": avant[cle], "apres": apres[cle]}
+               for cle, nom in NIVEAUX_MESURE
+               if apres[cle] < avant[cle] - TOLERANCE_RAPPEL]
+    return {"comparable": True, "baisses": baisses}
+
+
+def version_du_code(racine: Path | None = None) -> str:
+    """``__version__`` lue dans le fichier, pas dans le module deja charge :
+    apres une mise a jour, ce dernier decrirait l'ancienne version."""
+    try:
+        texte = ((racine or paths.project_root()) / "src" / "caviardoc"
+                 / "__init__.py").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    m = re.search(r'^__version__\s*=\s*"([^"]+)"', texte, re.M)
+    return m.group(1) if m else ""
+
+
+def version_de_la_cible(reference: str) -> str:
+    """Numero de version de la cible : le tag qui pointe dessus, sinon la
+    version inscrite dans le code. Chaine vide si rien ne la donne ; ne leve
+    jamais, la mise a jour ne doit pas en dependre."""
+    try:
+        if reference and est_un_depot():
+            res = _git("describe", "--tags", "--exact-match", reference,
+                       delai=30)
+            tag = res.stdout.strip().removeprefix("v")
+            if res.returncode == 0 and _numeros(tag) is not None:
+                return tag
+    except Exception:
+        pass
+    try:
+        return version_du_code()
+    except Exception:
+        return ""
 
 
 _LIGNE_MESURE = re.compile(r"(rappel_\w+)\s+([\d.]+)\s*%")
@@ -354,6 +428,9 @@ def appliquer_code(journal=None) -> dict:
                 "revision": etat.locale.reference}
 
     avant = dernier_rappel()
+    from . import models
+    mesure_avant = models.derniere_mesure()
+    version_de = version_du_code()
     depart = etat.locale.reference
     noter(f"version installee : {depart}")
     noter(f"version disponible : {etat.distante.reference} "
@@ -368,6 +445,13 @@ def appliquer_code(journal=None) -> dict:
         for ligne in (fusion.stdout + fusion.stderr).splitlines():
             noter(ligne)
         if fusion.returncode != 0:
+            sortie = fusion.stdout + fusion.stderr
+            if "untracked working tree files" in sortie:
+                raise MajImpossible(
+                    "Mise à jour impossible : un fichier que vous avez "
+                    "ajouté dans le dossier du programme porte le même nom "
+                    "qu'un fichier de la nouvelle version. Déplacez-le ou "
+                    "renommez-le, puis relancez. Rien n'a été changé.")
             raise MajImpossible(
                 "Mise à jour impossible : cette copie a divergé de la version "
                 "publiée. Rien n'a été changé.")
@@ -380,6 +464,10 @@ def appliquer_code(journal=None) -> dict:
         "vers": etat.distante.reference,
         "commits": etat.retard,
         "rappel_avant": avant,
+        "mesure_avant": mesure_avant,
+        "version_de": version_de,
+        "version_vers": version_de_la_cible(
+            etat.cible or etat.distante.reference),
     }
     # Durable des maintenant : `appliquer_suite` l'efface en cas de succes.
     _noter_suite(compte)
@@ -453,12 +541,21 @@ def appliquer_suite(compte: dict, journal=None,
             "Relancez la mise à jour, ou mesurez depuis l'onglet Installation "
             "avant de confier un document à cette machine.")
 
-    avant = compte.get("rappel_avant")
-    compte = dict(compte, rappel_apres=apres,
-                  regression=(avant is not None and apres is not None
-                              and apres < avant - 0.5))
-    if compte["regression"]:
-        noter(f"ALERTE : le rappel passe de {avant:.1f} % a {apres:.1f} %")
+    compte = dict(compte, rappel_apres=apres, regression=False,
+                  baisses=[], mesure_comparable=None)
+    if apres is not None:
+        from . import models
+        verdict = comparer_mesures(compte.get("mesure_avant"),
+                                   models.derniere_mesure())
+        compte.update(mesure_comparable=verdict["comparable"],
+                      baisses=verdict["baisses"],
+                      regression=bool(verdict["baisses"]))
+        if not verdict["comparable"]:
+            noter("mesure precedente non comparable : "
+                  "nouvelle reference enregistree")
+        for b in verdict["baisses"]:
+            noter(f"ALERTE : le rappel {b['niveau']} passe de "
+                  f"{b['avant']:.1f} % a {b['apres']:.1f} %")
     # Le second temps est acheve : plus rien a reprendre.
     (paths.data_dir() / FICHIER_SUITE).unlink(missing_ok=True)
     return compte

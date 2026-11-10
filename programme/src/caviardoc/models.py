@@ -285,12 +285,16 @@ def derniere_mesure() -> dict | None:
     return mesure if isinstance(mesure, dict) else None
 
 
-def noter_mesure(cle: str, mesures: dict, tenu: bool) -> dict:
+def noter_mesure(cle: str, mesures: dict, tenu: bool,
+                 corpus: str | None = None) -> dict:
     """Enregistre une mesure, qu'elle tienne les seuils ou non.
 
     Un echec s'enregistre comme un succes : c'est meme le cas le plus utile a
     conserver, puisque c'est celui ou l'utilisateur ne doit rien confier a la
     machine. Ce que l'echec n'autorise pas, c'est de retenir le modele.
+
+    ``corpus`` : l'empreinte du corpus mesure. Sans elle, deux mesures ne se
+    comparent pas : un chiffre n'a de sens que sur le meme corpus.
     """
     import time
 
@@ -300,6 +304,8 @@ def noter_mesure(cle: str, mesures: dict, tenu: bool) -> dict:
         "tenu": bool(tenu),
         **{nom: round(valeur * 100, 1) for nom, valeur in mesures.items()},
     }
+    if corpus:
+        releve["corpus"] = corpus
     _ecrire_etat({CLE_ETAT_MESURE: releve})
     return releve
 

@@ -20,6 +20,7 @@ Usage :
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from dataclasses import dataclass
@@ -324,7 +325,8 @@ def _enregistrer(mesures: dict, sous: list[str]) -> int:
 
     cle = _modele_mesure or reg.modele_actif()
     tenu = not sous
-    reg.noter_mesure(cle, mesures, tenu)
+    reg.noter_mesure(cle, mesures, tenu,
+                     corpus=hashlib.sha256(CORPUS.read_bytes()).hexdigest())
     print()
 
     if not tenu:

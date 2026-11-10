@@ -22,6 +22,19 @@ def _isole() -> bool:
 
 
 @pytest.fixture(autouse=True)
+def _donnees_dans_un_repertoire_de_test(monkeypatch, tmp_path_factory):
+    """Aucun test n'ecrit dans le repertoire de donnees de l'utilisateur.
+
+    Un test qui notait une mesure (97 %) sans isoler le repertoire ecrasait le
+    `state.json` reel : la mise a jour suivante comparait alors la mesure a
+    une reference factice. Les tests qui veulent un autre repertoire le
+    redefinissent eux-memes par `CAVIARDOC_DATA_DIR`.
+    """
+    monkeypatch.setenv("CAVIARDOC_DATA_DIR",
+                       str(tmp_path_factory.mktemp("donnees_auto")))
+
+
+@pytest.fixture(autouse=True)
 def _ne_pas_toucher_aux_donnees_reelles(monkeypatch, tmp_path_factory):
     """Un test qui n'isole pas le repertoire de donnees ne doit ni y ecrire, ni
     en deplacer quoi que ce soit.
